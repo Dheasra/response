@@ -2,7 +2,7 @@ import numpy as np
 from vampyr import vampyr3d as vp
 from typing import Any
 
-class Kain():
+class KAIN():
     """Mimics the mrchem::KAIN class from mrchem.
     The procedure is as follows:
     - the user provides a function f^n and an update, df^{n'} = f^{n+1'} - f^n, through application of a greens kernel. e.g. f^{n+1'} = G\star{f^n} .
@@ -21,7 +21,7 @@ class Kain():
     c : np.ndarray[(Any,)]
     
     def __init__(self, history) -> None:
-        self.instance_index = len(Kain.instances)
+        self.instance_index = len(KAIN.instances)
         self.instances.append(self)
         self.history = history
         
