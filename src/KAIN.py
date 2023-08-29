@@ -61,7 +61,7 @@ class KAIN():
         self.solveLinearSystem()
         kain_updates = self.expandSolution()
         
-        return functions, kain_updates
+        return kain_updates
         
 
     def setupLinearSystem(self):
