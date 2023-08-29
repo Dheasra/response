@@ -1,6 +1,6 @@
 import numpy as np
 from vampyr import vampyr3d as vp
-from typing import Any
+from typing import Any, List
 
 class KAIN():
     """Mimics the mrchem::KAIN class from mrchem.
@@ -20,16 +20,18 @@ class KAIN():
     b : np.ndarray[(Any,)]
     c : np.ndarray[(Any,)]
     
+    func_history : List[List[vp.FunctionTree]]
+    update_history : List[List[vp.FunctionTree]]
+    
     def __init__(self, history) -> None:
         self.instance_index = len(KAIN.instances)
         self.instances.append(self)
         self.history = history
         
-        self.f = []
-        self.df = []
-    
+        self.func_history = []
+        self.update_history = []    
         
-    def accelerate(self, func, dfunc):
+    def accelerate(self, functions, functions_updates):
         """
         Accelerate the function func using the Kain update procedure.
         We receive the function and its update, and append them to the history.
@@ -38,47 +40,45 @@ class KAIN():
         this is meant to mimic the way the mrchem::KAIN class works.
 
         Args:
-            func (vampyr.vampyr3d.FunctionTree): function to be appended to the history
-            dfunc (vampyr.vampyr3d.FunctionTree): update of the function before acceleration. To be appended to the history
+            functions (vampyr.vampyr3d.FunctionTree): function list to be appended to the history
+            functions_updates (vampyr.vampyr3d.FunctionTree): list of updates of the functions before acceleration. To be appended to the history
 
         Returns:
-            tuple(vampyr.vampyr3d.FunctionTree, vampyr.vampyr3d.FunctionTree): input function and its kain update
+            tuple(vampyr.vampyr3d.FunctionTree, vampyr.vampyr3d.FunctionTree): input function list and its kain update list
         """
         
-        self.f.append(func.deepCopy())
-        self.df.append(dfunc.deepCopy())
+        self.func_history.append(functions)
+        self.update_history.append(functions_updates)
         
-        if (len(self.f) == 1) or (len(self.df) == 1):
-            return func, dfunc
+        if (len(self.func_history) == 1) or (len(self.update_history) == 1):
+            return functions, functions_updates
         
-        if ((len(self.f) > self.history) or (len(self.df) > self.history)):
-            self.f.pop(0)
-            self.df.pop(0)
+        if ((len(self.func_history) > self.history) or (len(self.update_history) > self.history)):
+            self.func_history.pop(0)
+            self.update_history.pop(0)
 
         self.setupLinearSystem()
         self.solveLinearSystem()
-        kain_update = self.expandSolution()
+        kain_updates = self.expandSolution()
         
-        self.clear()  # fill all ndarrays with zeros, might not be necessary
-        
-        return func, kain_update  
+        return functions, kain_updates
         
 
     def setupLinearSystem(self):
-        nHistory = len(self.f) -1
+        nHistory = len(self.func_history) -1
 
         # Compute matrix A
         self.A = np.zeros((nHistory, nHistory))
         self.b = np.zeros(nHistory)
-        phi_m = self.f[nHistory].deepCopy()
-        fPhi_m = self.df[nHistory].deepCopy()
+        phi_m = self.func_history[nHistory][0]
+        fPhi_m = self.update_history[nHistory][0]
         
         for i in range(nHistory):
-            phi_i = self.f[i]
+            phi_i = self.func_history[i][0]
             dPhi_im = phi_i - phi_m
             
             for j in range(nHistory):
-                fPhi_j = self.df[j]
+                fPhi_j = self.update_history[j][0]
                 dfPhi_jm = fPhi_j - fPhi_m
                 self.A[i, j] -= vp.dot(dPhi_im, dfPhi_jm)
             self.b[i] += vp.dot(dPhi_im, fPhi_m)
@@ -92,20 +92,18 @@ class KAIN():
 
 
     def expandSolution(self):
-        nHistory = len(self.f) -1
+        kain_updates = []
+        nHistory = len(self.func_history) -1
 
-        phi_m = self.f[nHistory].deepCopy()
-        fPhi_m = self.df[nHistory].deepCopy()
+        phi_m = self.func_history[nHistory][0].deepCopy()
+        fPhi_m = self.update_history[nHistory][0].deepCopy()
         
         for j in range(nHistory):
-            fPhi_m += (self.f[j] + self.df[j] - phi_m - fPhi_m)*self.c[j]
+            fPhi_m += (self.func_history[j][0] + self.update_history[j][0] - phi_m - fPhi_m)*self.c[j]
         
-        return fPhi_m.deepCopy()
-        
-    def clear(self):
-        self.A.fill(0)
-        self.b.fill(0)
-        self.c.fill(0)
+        kain_updates.append(fPhi_m)
+        return kain_updates
+
 
     @property
     def A(self):
@@ -138,20 +136,20 @@ class KAIN():
         
     
     @property
-    def f(self):
-        return self.instances[self.instance_index]._f
+    def func_history(self):
+        return self.instances[self.instance_index]._func_history
     
-    @f.setter
-    def f(self, f):
-        self.instances[self.instance_index]._f = f
+    @func_history.setter
+    def func_history(self, func):
+        self.instances[self.instance_index]._func_history = func
     
     
     @property
-    def df(self):
-        return self.instances[self.instance_index]._df
+    def update_history(self):
+        return self.instances[self.instance_index]._update_history
     
-    @df.setter
-    def df(self, df):
-        self.instances[self.instance_index]._df = df
+    @update_history.setter
+    def update_history(self, upd):
+        self.instances[self.instance_index]._update_history = upd
         
             
