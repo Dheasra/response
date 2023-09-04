@@ -16,9 +16,9 @@ class KAIN():
     
     instances = []
     
-    A : np.ndarray[(Any, Any)]
-    b : np.ndarray[(Any,)]
-    c : np.ndarray[(Any,)]
+    A : List[np.ndarray[(Any, Any)]]  # vector of A matrices
+    b : List[np.ndarray[(Any,)]]      # vector of b vectors
+    c : List[np.ndarray[(Any,)]]      # vector of c vectors
     
     func_history : List[List[vp.FunctionTree]]
     update_history : List[List[vp.FunctionTree]]
@@ -29,7 +29,11 @@ class KAIN():
         self.history = history
         
         self.func_history = []
-        self.update_history = []    
+        self.update_history = [] 
+        
+        self.A = []
+        self.b = []
+        self.c = []   
         
     def accelerate(self, functions, functions_updates):
         """
@@ -51,7 +55,7 @@ class KAIN():
         self.update_history.append(functions_updates)
         
         if (len(self.func_history) == 1) or (len(self.update_history) == 1):
-            return functions, functions_updates
+            return functions_updates
         
         if ((len(self.func_history) > self.history) or (len(self.update_history) > self.history)):
             self.func_history.pop(0)
@@ -60,51 +64,71 @@ class KAIN():
         self.setupLinearSystem()
         self.solveLinearSystem()
         kain_updates = self.expandSolution()
+        self.cleanLinearSystem()
         
         return kain_updates
         
 
     def setupLinearSystem(self):
         nHistory = len(self.func_history) -1
-
-        # Compute matrix A
-        self.A = np.zeros((nHistory, nHistory))
-        self.b = np.zeros(nHistory)
-        phi_m = self.func_history[nHistory][0]
-        fPhi_m = self.update_history[nHistory][0]
-        
-        for i in range(nHistory):
-            phi_i = self.func_history[i][0]
-            dPhi_im = phi_i - phi_m
+        nOrbitals = len(self.func_history[nHistory])
+        print("nOrbitals: ", nOrbitals )
+        for n in range(nOrbitals):
+            orbA = np.zeros((nHistory, nHistory))
+            orbB = np.zeros(nHistory)
             
-            for j in range(nHistory):
-                fPhi_j = self.update_history[j][0]
-                dfPhi_jm = fPhi_j - fPhi_m
-                self.A[i, j] -= vp.dot(dPhi_im, dfPhi_jm)
-            self.b[i] += vp.dot(dPhi_im, fPhi_m)
+            phi_m = self.func_history[nHistory][n]
+            fPhi_m = self.update_history[nHistory][n]
+            
+            for i in range(nHistory):
+                phi_i = self.func_history[i][n]
+                dPhi_im = phi_i - phi_m
+                
+                for j in range(nHistory):
+                    fPhi_j = self.update_history[j][n]
+                    dfPhi_jm = fPhi_j - fPhi_m
+                    orbA[i, j] -= vp.dot(dPhi_im, dfPhi_jm)
+                orbB[i] += vp.dot(dPhi_im, fPhi_m)
+            print("appending to A and b")
+            self.A.append(orbA)
+            self.b.append(orbB)
+        print("length of A: ", len(self.A))
+        print("length of b: ", len(self.b))
         return   
 
 
     def solveLinearSystem(self):
-        self.c = np.zeros(len(self.b))
-        self.c = np.linalg.solve(self.A, self.b)
+        print("length of b:", (len(self.b)))
+        for i in range(len(self.b)):
+            tempC = np.linalg.solve(self.A[i], self.b[i])
+            self.c.append(tempC)
+        print("length of c: ", len(self.c))
+        print("length og c[0]: ", len(self.c[0]))
         return
 
 
     def expandSolution(self):
         kain_updates = []
         nHistory = len(self.func_history) -1
+        nOribtals = len(self.func_history[nHistory])
+        for n in range(nOribtals):    
+            phi_m = self.func_history[nHistory][n].deepCopy()
+            fPhi_m = self.update_history[nHistory][n].deepCopy()
+        
+            for j in range(nHistory):
 
-        phi_m = self.func_history[nHistory][0].deepCopy()
-        fPhi_m = self.update_history[nHistory][0].deepCopy()
+                fPhi_m += (self.func_history[j][n] + self.update_history[j][n] - phi_m - fPhi_m)*self.c[n][j]
         
-        for j in range(nHistory):
-            fPhi_m += (self.func_history[j][0] + self.update_history[j][0] - phi_m - fPhi_m)*self.c[j]
-        
-        kain_updates.append(fPhi_m)
+            kain_updates.append(fPhi_m)
         return kain_updates
 
 
+    def cleanLinearSystem(self):
+        # TODO check that no memory leak happens here
+        self.A = []
+        self.b = []
+        self.c = []
+    
     @property
     def A(self):
         return self.instances[self.instance_index]._A
