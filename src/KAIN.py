@@ -20,8 +20,8 @@ class KAIN():
     b : List[np.ndarray[(Any,)]]      # vector of b vectors
     c : List[np.ndarray[(Any,)]]      # vector of c vectors
     
-    func_history : List[List[vp.FunctionTree]]
-    update_history : List[List[vp.FunctionTree]]
+    func_history : List[List[vp.FunctionTree]]  # vector of vectors of functions
+    update_history : List[List[vp.FunctionTree]] # vector of vectors of the function updates
     
     def __init__(self, history) -> None:
         self.instance_index = len(KAIN.instances)
@@ -72,7 +72,6 @@ class KAIN():
     def setupLinearSystem(self):
         nHistory = len(self.func_history) -1
         nOrbitals = len(self.func_history[nHistory])
-        print("nOrbitals: ", nOrbitals )
         for n in range(nOrbitals):
             orbA = np.zeros((nHistory, nHistory))
             orbB = np.zeros(nHistory)
@@ -89,21 +88,15 @@ class KAIN():
                     dfPhi_jm = fPhi_j - fPhi_m
                     orbA[i, j] -= vp.dot(dPhi_im, dfPhi_jm)
                 orbB[i] += vp.dot(dPhi_im, fPhi_m)
-            print("appending to A and b")
             self.A.append(orbA)
             self.b.append(orbB)
-        print("length of A: ", len(self.A))
-        print("length of b: ", len(self.b))
         return   
 
 
     def solveLinearSystem(self):
-        print("length of b:", (len(self.b)))
         for i in range(len(self.b)):
             tempC = np.linalg.solve(self.A[i], self.b[i])
             self.c.append(tempC)
-        print("length of c: ", len(self.c))
-        print("length og c[0]: ", len(self.c[0]))
         return
 
 
@@ -124,56 +117,8 @@ class KAIN():
 
 
     def cleanLinearSystem(self):
-        # TODO check that no memory leak happens here
         self.A = []
         self.b = []
         self.c = []
     
-    @property
-    def A(self):
-        return self.instances[self.instance_index]._A
     
-
-    @A.setter
-    def A(self, A):
-        self.instances[self.instance_index]._A = A
-        
-    
-    @property
-    def b(self):
-        return self.instances[self.instance_index]._b
-    
-
-    @b.setter
-    def b(self, b):
-        self.instances[self.instance_index]._b = b
-        
-    
-    @property
-    def c(self):
-        return self.instances[self.instance_index]._c
-    
-
-    @c.setter
-    def c(self, c):
-        self.instances[self.instance_index]._c = c
-        
-    
-    @property
-    def func_history(self):
-        return self.instances[self.instance_index]._func_history
-    
-    @func_history.setter
-    def func_history(self, func):
-        self.instances[self.instance_index]._func_history = func
-    
-    
-    @property
-    def update_history(self):
-        return self.instances[self.instance_index]._update_history
-    
-    @update_history.setter
-    def update_history(self, upd):
-        self.instances[self.instance_index]._update_history = upd
-        
-            
