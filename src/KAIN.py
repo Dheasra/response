@@ -3,13 +3,14 @@ from vampyr import vampyr3d as vp
 from typing import Any, List
 
 class KAIN():
-    """Mimics the mrchem::KAIN class from mrchem.
+    """
+    Mimics the mrchem::KAIN class from mrchem.
     The procedure is as follows:
-    - the user provides a function f^n and an update, df^{n'} = f^{n+1'} - f^n, through application of a greens kernel. e.g. f^{n+1'} = G\star{f^n} .
+    - the user provides a function f^n and an update, df^{n'} = f^{n+1'} - f^n, through application of a greens kernel. e.g. f^{n+1'} = G\\star{f^n} .
     - the user calls the accelerate method, which appends f^n and df^{n'} to the function history vector f, and the update history vector df.
     - The accelerate methods solves a linear system constructed from both history vectors, f and df, to generate a kain update, df^{n}.
     - The accelerate method returns both f^n and df^{n} to the user, who can then use these to construct a proper update f^{n+1} = f^n + df^{n}.
-    - for the next iteration the user provides the new fucntion f^{n+1} and a new update df^{n+1'} = f^{n+2'} - f^{n+1} (where  f^{n+2'} =G\star{f^{n+1}}), and repeats the procedure as before.
+    - for the next iteration the user provides the new fucntion f^{n+1} and a new update df^{n+1'} = f^{n+2'} - f^{n+1} (where  f^{n+2'} =G\\star{f^{n+1}}), and repeats the procedure as before.
     
     For the zeroth iteration the accelerate method only appends and does not solve a linear system, as there is not enough history to do so.
     """
