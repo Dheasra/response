@@ -1,12 +1,13 @@
-from vampyr import vampyr3d as vp
-import numpy as np
 import matplotlib.pyplot as plt
-# from copy import deepcopy
-
+import numpy as np
 # import KAIN
 import utils
+from vampyr import vampyr3d as vp
 
-class scfsolv:
+# from copy import deepcopy
+
+
+class scfsolv_wrong:
     world : vp.BoundingBox
     mra : vp.MultiResolutionAnalysis
     prec : float
@@ -16,7 +17,7 @@ class scfsolv:
     G_mu : list                             #list of Helmholtz operator for every orbital
     Norb : int                              #number of orbitals
     Fock : list                             #Fock matrix
-    Vnuc : vp.FunctionTree                  #nuclear potential
+    Vnuc : list                             # list of unperturbed and perturbed nuclear potential
     J : list                                #Coulomb potential
     K : list                                #list of exchange potential applied to each orbital
     phi_prev : list                         #list of all orbitals and their KAIN history
@@ -41,8 +42,9 @@ class scfsolv:
         #Physical properties (placeholder values)
         self.Norb = 1
         self.Fock = [np.zeros((self.Norb, self.Norb)) for i in range(pert_order+1)]
+        # print("Construct Fock",len(self.Fock)) #debug
         self.J = [self.P_eps(utils.Fzero) for i in range(pert_order+1)]
-        self.Vnuc = self.P_eps(utils.Fzero)
+        self.Vnuc = [self.P_eps(utils.Fzero) for i in range(pert_order+1)]
         self.K = []
         self.R = []
         self.Z = []
@@ -62,7 +64,7 @@ class scfsolv:
         self.Norb = No
         self.R = pos
         self.Z = Z
-        self.Vnuc = self.P_eps(lambda r : self.f_nuc(r))
+        self.Vnuc[0] = self.P_eps(lambda r : self.f_nuc(r))
         #initial guesses provided by mrchem
         self.phi_prev = []
         for i in range(self.Norb):
@@ -71,8 +73,7 @@ class scfsolv:
             self.phi_prev.append([[ftree]])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
         #Compute the unperturbed Fock matrix and potential operators 
-        self.compFock()
-        # print("squalalala",self.Fock)
+        self.compFock() #by default: unperturbed
         #Energies of each orbital
         E_n = []
         #internal nuclear energy
@@ -86,75 +87,91 @@ class scfsolv:
             mu = np.sqrt(-2*E_n[i])
             # mu = 1 #E = -0.5 analytical solution
             self.G_mu.append(vp.HelmholtzOperator(self.mra, mu, self.prec))  # Initalize the operator
-        for orb in range(self.Norb):
-            #First establish a history (at least one step) of corrections to the orbital with standard iterations with Helmholtz operator to create
-            #Construct Sum_j!=i F_ij phi_j
-            phi_tmp = self.P_eps(utils.Fzero)
-            for j in range(self.Norb):
-                if j != orb:
-                    phi_tmp = phi_tmp + self.Fock[0][orb, j]*self.phi_prev[j][-1][0]
-            # Apply Helmholtz operator to obtain phi_np1 #5
-            phi_np1 = -2*self.G_mu[orb]((self.Vnuc + self.J[0])*self.phi_prev[orb][-1][0] - self.K[orb][0] - phi_tmp)
-            # Compute update = ||phi^{n+1} - phi^{n}|| #6
-            self.f_prev[orb].append([phi_np1 - self.phi_prev[orb][-1][0]])
-            phi_np1.normalize()
-            self.phi_prev[orb].append([phi_np1])
-        #Orthonormalise orbitals since they are molecular orbitals
-        phi_ortho = self.orthonormalise()
-        for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
-            self.phi_prev[orb][-1][0] = phi_ortho[orb]
+        offset = 0 #offset in indices due to questionable orbital storage format, more info in the CompFock method
+        for o in range(self.Po+1):
+            if o > 0:
+                offset = -1
+                print("initmolec",len(self.phi_prev[0]))
+                self.Vnuc[o] = [self.Vnuc[0]*1e-3]
+                for orb in range(self.Norb):
+                    self.phi_prev[orb][0].append(self.P_eps(utils.Fzero))
+                self.compFock(o)
+            for orb in range(self.Norb):
+                #First establish a history (at least one step) of corrections to the orbital with standard iterations with Helmholtz operator to create
+                # Apply Helmholtz operator to obtain phi_np1 #5
+                phi_np1 = self.powerIter(orb, o)
+                # Compute update = ||phi^{n+1} - phi^{n}|| #6
+                self.f_prev[orb].append([phi_np1 - self.phi_prev[orb][-1+offset][o]])
+                phi_np1.normalize()
+                if o > 0:
+                    print("POUEUTEUTUETUEUTEUTUE")
+                    self.phi_prev[orb][-1].append(phi_np1)
+                else:
+                    self.phi_prev[orb].append([phi_np1])
+            #Orthonormalise orbitals since they are molecular orbitals
+            phi_ortho = self.orthonormalise(o)
+            for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
+                self.phi_prev[orb][-1][o] = phi_ortho[orb]
+            
     
     #computation of operators
-    def compFock(self, order = 0) -> None: 
-        self.Fock = [np.zeros((self.Norb, self.Norb))]
-        self.K = []
+    def compFock(self, order = 0) -> None: #Computes the Fock matrix
+        self.Fock[order] = np.zeros((self.Norb, self.Norb))
+        if order == 0:
+            self.K = []
         self.J[order] = self.computeCoulombPot(order)
         for j in range(self.Norb):
             #Compute the potential operator
-            # print("K",j)
-            self.K.append([self.computeExchangePotential(j, order)])
-            # V = Vnuc
+            if order == 0:
+                self.K.append([self.computeExchangePotential(j, order)])
+            else:
+                self.K[j].append(self.computeExchangePotential(j, order))
             # compute the energy from the orbitals 
-            Divphi_n = self.D(self.D(self.phi_prev[j][-1][0], 0), 0) + self.D(self.D(self.phi_prev[j][-1][0], 1), 1) + self.D(self.D(self.phi_prev[j][-1][0], 2), 2) #Laplacian of the orbitals
+            Fphi = self.compFop(j, order, 0)
             for i in range(self.Norb):
-                pTp = vp.dot(self.phi_prev[i][-1][0],-0.5*Divphi_n) #<phi_n|T|phi_n> -- Kinetic energy             
-                pVp = vp.dot(self.phi_prev[i][-1][0], self.Vnuc*self.phi_prev[j][-1][0] + self.J[order]*self.phi_prev[j][-1][0] - self.K[j][order]) # Potential Energy
-                self.Fock[order][i, j] = pTp + pVp 
+                print("Comp Fock",len(self.phi_prev), i)
+                self.Fock[order][i,j] = vp.dot(self.phi_prev[i][-1][0], Fphi)
 
-    def compRho(self, orb1, orb2, order = 0):
+    def compFop(self, orb, orderF = 0, orderPhi = 0): #Computes the Fock operator applied to an orbital orb #TODO: modifier ça pour que ça rentre dans compFock
+        Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1][orderPhi], 0), 0) + self.D(self.D(self.phi_prev[orb][-1][orderPhi], 1), 1) + self.D(self.D(self.phi_prev[orb][-1][orderPhi], 2), 2)) #Laplacian of the orbitals
+        print(len(self.K[orb]), orderF, len(self.K))
+        # Fphi = Tphi + self.Vnuc[orderF]*self.phi_prev[orb][-1][orderPhi] + self.J[orderF]*self.phi_prev[orb][-1][orderPhi] - self.K[orb][orderF]
+        Fphi = Tphi + self.Vnuc[0]*self.phi_prev[orb][-1][orderPhi] + self.J[orderF]*self.phi_prev[orb][-1][orderPhi] - self.K[orb][orderF]
+        return Fphi
+
+    def compRho(self, orb1, orb2, order = 0): #todo mettre un offset pour les pertubration
+        offset = 0 #because of the way orbitals are stored, once we want to compute perturbed orbitals, the last element in the "kain history" list only contains unperturbed orbitals, we thus have to look one orbital before
+        if order > 0:
+            offset = -1
         out = self.P_eps(utils.Fzero)
+        # print("compRho", len(self.phi_prev[orb1][-1]))
         for i in range(order + 1):
-            # print("pouet", i, order-i, order)
-            out = out + self.phi_prev[orb1][-1][i]*self.phi_prev[orb2][-1][order-i]
+            out = out + self.phi_prev[orb1][-1+offset][i]*self.phi_prev[orb2][-1+offset][order-i]
         return out
             
 
     def computeCoulombPot(self, order = 0): 
-        # print("coulombPot")
-        # PNbr = 4*np.pi*self.phi_prev[0][-1][order]*self.phi_prev[0][-1][order] #debug
         PNbr = 4*np.pi*self.compRho(0,0, order) #padbug
         for orb in range(1, self.Norb):
-            # print("coulPot", orb)
-            # PNbr = PNbr + 4*np.pi*self.phi_prev[orb][-1][order]*self.phi_prev[orb][-1][order]#debug
             PNbr = PNbr + 4*np.pi*self.compRho(orb,orb, order)#padbug
-        # print("CoulPot done")
         return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
 
-    def computeExchangePotential(self, idx, order = 0):
-        # print("comp K")
-        # K = self.phi_prev[0][-1][order]*self.Pois(4*np.pi*self.phi_prev[0][-1][order] * self.phi_prev[idx][-1][order])#debug
-        K = self.phi_prev[0][-1][order]*self.Pois(4*np.pi*self.compRho(0, idx, order))#padbug
+    def computeExchangePotential(self, idx, order = 0, orderPhi = 0):
+        K = self.phi_prev[0][-1][orderPhi]*self.Pois(4*np.pi*self.compRho(0, idx, order))#padbug
         for j in range(1, self.Norb):
-            # print("CK", j)
-            # K = K + self.phi_prev[j][-1][order]*self.Pois(4*np.pi*self.phi_prev[j][-1][order] * self.phi_prev[idx][-1][order])#debug
-            K = K + self.phi_prev[j][-1][order]*self.Pois(4*np.pi*self.compRho(j, idx, order))#padbug
-        # print("CK done")
+            K = K + self.phi_prev[j][-1][orderPhi]*self.Pois(4*np.pi*self.compRho(j, idx, order))#padbug
         return K 
     
-    def expandSolution(self, order=0):
+    def expandSolution(self, order=0): #TODO: modifier 1er ordre
         #Orthonormalise orbitals in case they aren't yet
-        phi_ortho = self.orthonormalise(order)
+        print("orthonorm phi_prev ", len(self.phi_prev[0][-1]), len(self.phi_prev[1][-1]), len(self.phi_prev[2][-1]),len(self.phi_prev[3][-1]),len(self.phi_prev[4][-1]))
+        offset = 0
+        if order>0:
+            offset = -1
+        phi_ortho = self.orthonormalise(order, offset=offset) #TODO: mettre l'offset d'indices ici pour order>0
         for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
+            print(len(self.phi_prev[0][-1]))
+            print("orb =", orb, order)
             self.phi_prev[orb][-1][order] = phi_ortho[orb]
         #Compute the fock matrix of the system
         self.compFock(order)
@@ -167,26 +184,18 @@ class scfsolv:
             #Redefine the Helmholtz operator with the updated energy
             mu = np.sqrt(-2*E_n[orb])
             self.G_mu[orb] = vp.HelmholtzOperator(self.mra, mu, self.prec) 
-
-            #Compute phi_tmp := Sum_{j!=i} F_ij*phi_j 
-            phi_tmp = self.P_eps(utils.Fzero)
-            for orb2 in range(self.Norb):
-                #Compute off-diagonal Fock matrix elements
-                if orb2 != orb:
-                    phi_tmp = phi_tmp + self.Fock[order][orb, orb2]*self.phi_prev[orb2][-1][order]
             #Compute new power iteration for the Helmholtz operatort 
-            # phi_np1 = -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_tmp) #TODO: faire une fonction qui change cette formule automatiquement pour chaque ordre 
-            phi_np1 = self.powerIter(orb, phi_tmp, order)
+            phi_np1 = self.powerIter(orb, order)
             #create an alternate history of orbitals which include the power iteration
             phistory.append([[phi_np1]])
         #Orthonormalise the alternate orbital history
-        phistory = self.orthonormalise(order, phistory)
+        print("orthonorm Expanddong")
+        phistory = self.orthonormalise(0, phistory) #here order=0 because phistory will only contain the power iteration for the current choice of perturbation order (i.e. `order` is implicit and doesn't need to be specified a second time, else out-of-range indices are what you seek)
         # phi_prev = orthonormalise(phi_prev)
         for orb in range(self.Norb): 
             self.f_prev[orb].append([phistory[orb] - self.phi_prev[orb][-1][order]])
             #Setup and solve the linear system Ac=b
             c = self.setuplinearsystem(orb, order)
-            # print("squalalala",c)
             #Compute the correction delta to the orbitals 
             delta = self.f_prev[orb][-1][order]
             for j in range(len(self.phi_prev[orb])-1):
@@ -209,11 +218,30 @@ class scfsolv:
                 del self.f_prev[orb][0]
         return np.array(E_n), np.array(norm), np.array(update)
     
-    def powerIter(self, orb, phi_ortho, order=0):
+    def powerIter(self, orb, order=0):
         if order == 1:
-            print("TODODODODODODODODO")
+            # print("TODODODODODODODODO")
+            Fphi = self.compFop(orb, 1, 0)
+            # rho0 = self.compRho(0, 0, 0)
+            # for o in range(1,self.Norb):
+            #     rho0 = rho0 + self.compRho(o, o, 0)
+            phi_ortho = self.P_eps(utils.Fzero)
+            #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
+            for j in range(self.Norb): 
+                phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
+            #Compute the term \hat{rho}^0*\hat{F}^1|phi^0_i>
+            rhoFphi = self.P_eps(utils.Fzero)
+            for j in range(self.Norb):
+                rhoFphi += self.Fock[order][j, orb] * self.phi_prev[j][-2][0]
+            return -2*self.G_mu[orb]((self.Vnuc[0] + self.J[0])*self.phi_prev[orb][-2][1] - self.K[orb][1] - phi_ortho + Fphi - rhoFphi) 
         else: #order == 0
-            return -2*self.G_mu[orb]((self.Vnuc + self.J[0])*self.phi_prev[orb][-1][0] - self.K[orb][0] - phi_ortho)
+            #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
+            phi_ortho = self.P_eps(utils.Fzero) 
+            for orb2 in range(self.Norb):
+                #Compute off-diagonal Fock matrix elements
+                if orb2 != orb:
+                    phi_ortho = phi_ortho + self.Fock[order][orb, orb2]*self.phi_prev[orb2][-1][order]
+            return -2*self.G_mu[orb]((self.Vnuc[order] + self.J[0])*self.phi_prev[orb][-1][0] - self.K[orb][0] - phi_ortho)
 
     def setuplinearsystem(self,orb, order=0):
         lenHistory = len(self.phi_prev[orb])
@@ -229,16 +257,18 @@ class scfsolv:
         c = np.linalg.solve(A, b)
         return c
 
-    def scfRun(self, thrs = 1e-3, printVal = False, pltShow = False):
+    def scfRun(self, thrs = 1e-3,  printVal = False, pltShow = False):
         update = np.ones(self.Norb)
         norm = np.zeros(self.Norb)
         #iteration counter
         i = 0
-        # Optimization loop (KAIN) #TODO continuer
+        # Optimization loop (KAIN) 
         while update.max() > thrs:
             print(f"=============Iteration: {i}")
             i += 1 
             E_n, norm, update = self.expandSolution(0)
+            # for o in range(1,self.Po+1):
+            #     self.expandSolution(o)
             for orb in range(self.Norb):
                 # this will plot the wavefunction at each iteration
                 r_x = np.linspace(-5., 5., 1000)
@@ -266,22 +296,30 @@ class scfsolv:
                 out += self.Z[i]*self.Z[j]/np.sqrt((self.R[j][0]-self.R[i][0])**2 + (self.R[j][1]-self.R[i][1])**2 + (self.R[j][2]-self.R[i][2])**2)
         return out 
 
-    def computeOverlap(self, order = 0, phi_orth = None):
+    def computeOverlap(self, order = 0, phi_orth = None, offset = 0):
+        # offset = 0
+        # if order>0:
+        #     offset = -1
+        # pert_order = 0
         if phi_orth == None:
             phi_orth = self.phi_prev
+            # pert_order = order
         S = np.zeros((self.Norb, self.Norb)) #Overlap matrix S_i,j = <Phi^i|Phi^j>
         for i in range(self.Norb):
             for j in range(i, self.Norb):
-                S[i,j] = vp.dot(phi_orth[i][-1][order], phi_orth[j][-1][order]) #compute the overlap of the current ([-1]) step
+                S[i,j] = vp.dot(phi_orth[i][-1+offset][order], phi_orth[j][-1+offset][order]) #compute the overlap of the current ([-1]) step #TODO: le problème est list index out of range dans cette ligne
                 if i != j:
                     S[j,i] = np.conjugate(S[i,j])
         return S
 
-#TODO: normalement c'est bon jusque là
-    def orthonormalise(self, order=0, phi_in = None): #Lödwin orthogonalisation and normalisation
+
+    def orthonormalise(self, order=0, phi_in = None, offset = 0): #Lödwin orthogonalisation and normalisation
+        # offset = 0
+        # if order>0:
+        #     offset = -1
         if phi_in == None:
             phi_in = self.phi_prev
-        S = self.computeOverlap(order, phi_in)
+        S = self.computeOverlap(order, phi_in, offset=0)
         #Diagonalise S to compute S' := S^-1/2 
         eigvals, U = np.linalg.eigh(S) #U is the basis change matrix
 
@@ -295,7 +333,7 @@ class scfsolv:
             phi_tmp =  self.P_eps(utils.Fzero)
             for j in range(self.Norb):
             # for j in range(limit[i]):
-                phi_tmp = phi_tmp + Sprime[i,j]*phi_in[j][-1][order]
+                phi_tmp = phi_tmp + Sprime[i,j]*phi_in[j][-1+offset][order]
             phi_tmp.normalize()
             phi_ortho.append(phi_tmp)
         return phi_ortho
