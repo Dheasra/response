@@ -63,6 +63,7 @@ class scfsolv:
         self.phi_prev = []
         for i in range(self.Norb):
             ftree = vp.FunctionTree(self.mra)
+            print(f"{init_g_dir}phi_p_scf_idx_{i}_re")
             ftree.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
             self.phi_prev.append([ftree])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
@@ -86,7 +87,6 @@ class scfsolv:
             #First establish a history (at least one step) of corrections to the orbital with standard iterations with Helmholtz operator to create
             # Apply Helmholtz operator to obtain phi_np1 #5
             phi_np1 = self.powerIter(orb)
-            print("past power iter")
             # Compute update = ||phi^{n+1} - phi^{n}|| #6
             self.f_prev[orb].append(phi_np1 - self.phi_prev[orb][-1])
             phi_np1.normalize()
@@ -95,6 +95,9 @@ class scfsolv:
         phi_ortho = self.orthonormalise()
         for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
+
+    # def compOperators(self): #Compute operators 
+
 
     #computation of operators
     def compFock(self): 
@@ -303,27 +306,37 @@ class scfsolv_1stpert(scfsolv):
     f_prev1 : list                           #list of all 1st order perturbed orbitals updates and their KAIN history
     E1_n : list                              #list of perturbed orbital energies
 
-    def __init__(self, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0) -> None: 
-        super().__init__(prec, khist, lgdrOrder, sizeScale, nboxes, scling)
-        self.J1 = super().P_eps(utils.Fzero)
-        self.K1 = []
-        self.phi_prev1 = []
-        self.f_prev1 = []
+    # def __init__(self, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0) -> None: 
+    #     super().__init__(prec, khist, lgdrOrder, sizeScale, nboxes, scling)
+    #     self.J1 = super().P_eps(utils.Fzero)
+    #     self.K1 = []
+    #     self.phi_prev1 = []
+    #     self.f_prev1 = []
 
-    def __init__(self, Parent) -> None:
-        self.super = Parent
-        self.J1 = super().P_eps(utils.Fzero)
+    def __init__(self, *args) -> None:
+        if type(args[0]) is scfsolv:
+            self.__dict__ = args[0].__dict__.copy()
+            J1 = args[0].P_eps(utils.Fzero)
+        else:
+            print("TODO create a non-copy-from-the-parent constructor for scfsolv_1stpert")
+            pass 
+            # super(B, self).__init__(*args[:2])
+            # c = args[2]
+        self.J1 = J1
         self.K1 = []
         self.phi_prev1 = []
         self.f_prev1 = []
 
     def init_molec(self) -> None:
-        self.Vnuc1 = super().P_eps(lambda r : super().f_nuc(r)) #TODO: CHANGER ÇA SINON C'EST JUSTE scfsolv AVEC DES PAS SUPPLÉMENTAIRES
+        print("init_molec start")
+        self.Vnuc1 = self.P_eps(lambda r : self.f_nuc1(r)) 
+        print("Init_prout")
         #initial guesses can be zero for the perturbed orbitals
         self.phi_prev1 = []
         for i in range(self.Norb):
-            self.phi_prev.append([super().P_eps(utils.Fzero)])
-        self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
+            self.phi_prev1.append([self.P_eps(utils.Fzero)])
+        self.f_prev1 = [[] for i in range(self.Norb)] #list of the corrections at previous steps
+        print("passed init orb")
         #Compute the Fock matrix and potential operators 
         self.compFock()                                                         #TODO ODODODODODODOODO depuis là
         # print("squalalala",self.Fock)
@@ -331,8 +344,6 @@ class scfsolv_1stpert(scfsolv):
         self.E1_n = []
         #internal nuclear energy
         self.E_pp = super().fpp()
-        # Prepare Helmholtz operators
-        super().G_mu = []
         for i in range(self.Norb):
             self.E1_n.append(self.Fock[i,i])
             # mu = np.sqrt(-2*super().E_n[i])
@@ -363,7 +374,7 @@ class scfsolv_1stpert(scfsolv):
         self.E1_n = []
         norm = []
         update = []
-        for orb in range(super().Norb):
+        for orb in range(self.Norb):
             self.E1_n.append(self.Fock1[orb, orb])
             #Redefine the Helmholtz operator with the updated energy
             # mu = np.sqrt(-2*super().E_n[orb])
@@ -393,7 +404,7 @@ class scfsolv_1stpert(scfsolv):
             self.phi_prev1[orb].append(phi_n)
             #Correction norm (convergence metric)
             update.append(delta.norm())
-            if len(self.phi_prev1[orb]) > super().khist: #deleting oldest element to save memory
+            if len(self.phi_prev1[orb]) > self.khist: #deleting oldest element to save memory
                 del self.phi_prev1[orb][0]
                 del self.f_prev1[orb][0]
         return np.array(self.E1_n), np.array(norm), np.array(update)
@@ -412,40 +423,62 @@ class scfsolv_1stpert(scfsolv):
         c = np.linalg.solve(A, b)
         return c
 
+    def scfRun(self, thrs = 1e-3, printVal = False, pltShow = False):
+        update = np.ones(self.Norb)
+        norm = np.zeros(self.Norb)
+        #iteration counter
+        i = 0
+        # Optimization loop (KAIN) #TODO continuer
+        while update.max() > thrs:
+            print(f"=============Iteration: {i}")
+            i += 1 
+            self.E1_n, norm, update = self.expandSolution()
+            for orb in range(self.Norb):
+                # this will plot the wavefunction at each iteration
+                r_x = np.linspace(-5., 5., 1000)
+                phi_n_plt = [self.phi_prev[orb][-1]([x, 0.0, 0.0]) for x in r_x]
+                plt.plot(r_x, phi_n_plt) 
+                if printVal:
+                    print(f"Orbital: {orb}    Norm: {norm}    Update: {update}    Energy:{self.E1_n}")
+        if pltShow:
+            plt.show()
+        
     #computation of operators
     def compFock(self): 
-        self.Fock1 = np.zeros((super().Norb, super().Norb))
+        self.Fock1 = np.zeros((self.Norb, self.Norb))
         self.K1 = []
         self.J1 = self.computeCoulombPot()
-        for j in range(super().Norb):
+        for j in range(self.Norb):
             #Compute the potential operator
             self.K1.append(self.computeExchangePotential(j))
             # V = Vnuc
             # compute the energy from the orbitals 
             Fphi = self.compFop(j)
-            for i in range(super().Norb):
-                self.Fock1[i,j] = vp.dot(super().phi_prev[i][-1], Fphi)
+            for i in range(self.Norb):
+                self.Fock1[i,j] = vp.dot(self.phi_prev[i][-1], Fphi)
 
     def compFop(self, orb): #Computes the Fock operator applied to an orbital orb #TODO: modifier ça pour que ça rentre dans compFock
-        Tphi = -0.5*(super().D(super().D(super().phi_prev[orb][-1], 0), 0) + super().D(super().D(super().phi_prev[orb][-1], 1), 1) + super().D(super().D(super().phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
+        Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
         # Fphi = Tphi + self.Vnuc[orderF]*self.phi_prev[orb][-1] + self.J[orderF]*self.phi_prev[orb][-1] - self.K[orb][orderF]
-        Fphi = Tphi + self.Vnuc1*super().phi_prev[orb][-1] + self.J1*super().phi_prev[orb][-1] - self.K1[orb]
+        Fphi = Tphi + self.Vnuc1*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
         return Fphi
     
     def compRho(self, orb1, orb2 ):
-        rho = super().phi_prev[orb1][-1]*self.phi_prev1[orb2][-1] + self.phi_prev1[orb1][-1]*super().phi_prev[orb2][-1]
+        print("comp Rho", orb1, orb2)
+        print(len(self.phi_prev), len(self.phi_prev1))
+        rho = self.phi_prev[orb1][-1]*self.phi_prev1[orb2][-1] + self.phi_prev1[orb1][-1]*self.phi_prev[orb2][-1]
         return rho
 
     def computeCoulombPot(self): 
         PNbr = 4*np.pi*self.compRho(0,0)
-        for orb in range(1, super().Norb):
+        for orb in range(1, self.Norb):
             PNbr = PNbr + 4*np.pi*self.compRho(orb,orb)
         return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
 
     def computeExchangePotential(self, idx):
-        K = super().phi_prev[0][-1]*self.Pois(4*np.pi*self.compRho(0,idx))
-        for j in range(1, super().Norb):
-            K = K + super().phi_prev[j][-1]*self.Pois(4*np.pi*self.compRho(j,idx))
+        K = self.phi_prev[0][-1]*self.Pois(4*np.pi*self.compRho(0,idx))
+        for j in range(1, self.Norb):
+            K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compRho(j,idx))
         return K 
 
     def powerIter(self, orb): #TODO: C'est à moitié cassé, à corriger maintenant 
@@ -455,14 +488,23 @@ class scfsolv_1stpert(scfsolv):
         # rho0 = self.compRho(0, 0, 0)
         # for o in range(1,self.Norb):
         #     rho0 = rho0 + self.compRho(o, o, 0)
-        phi_ortho = super().P_eps(utils.Fzero)
+        phi_ortho = self.P_eps(utils.Fzero)
         #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
-        for j in range(super().Norb): 
+        for j in range(self.Norb): 
             # phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
-            phi_ortho = phi_ortho + super().Fock[orb, j]*self.phi_prev1[j][-1] 
+            phi_ortho = phi_ortho + self.Fock[orb, j]*self.phi_prev1[j][-1] 
         #Compute the term \hat{rho}^0*\hat{F}^1|phi^0_i>
-        rhoFphi = super().P_eps(utils.Fzero)
-        for j in range(super().Norb):
-            rhoFphi += self.Fock1[j, orb] * super().phi_prev[j][-2][0]
-        return -2*super().G_mu[orb]((super().Vnuc[0] + super().J[0])*self.phi_prev1[orb][-1] - super().K[orb] - phi_ortho + Fphi - rhoFphi) 
+        rhoFphi = self.P_eps(utils.Fzero)
+        for j in range(self.Norb):
+            rhoFphi += self.Fock1[j, orb] * self.phi_prev[j][-1]
+        print(len(self.G_mu), len(self.phi_prev1), len(self.K))
+        return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev1[orb][-1] - self.K[orb] - phi_ortho + Fphi - rhoFphi) 
+    
+    #Utilities
+    def f_nuc1(self, r, factor=0.95, offset = 0.1):   
+        out = 0
+        #electron-nucleus interaction
+        for i in range(self.Nz): 
+            out += -factor*self.Z[i]/np.sqrt((r[0]-self.R[i][0])**2 + (r[1]-self.R[i][1])**2 + (r[2]-self.R[i][2])**2) + offset/self.Nz
+        return out
  
