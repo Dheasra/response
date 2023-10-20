@@ -52,6 +52,7 @@ class scfsolv:
         self.khist = khist
         self.phi_prev = []
         self.f_prev = []
+        # print(self.world)
 
     def init_molec(self, No,  pos, Z, init_g_dir) -> None:
         self.Nz = len(Z)
@@ -121,7 +122,7 @@ class scfsolv:
 
     def compRho(self, orb1, orb2):
         rho = self.phi_prev[orb1][-1]*self.phi_prev[orb2][-1]
-        return rho
+        return 2*rho
 
     def computeCoulombPot(self): 
         PNbr = 4*np.pi*self.compRho(0, 0)
@@ -183,23 +184,6 @@ class scfsolv:
         return np.array(self.E_n), np.array(norm), np.array(update)
     
     def powerIter(self, orb):
-        # if order == 1:
-        #     # print("TODODODODODODODODO")
-        #     Fphi = self.compFop(orb, 1, 0)
-        #     # rho0 = self.compRho(0, 0, 0)
-        #     # for o in range(1,self.Norb):
-        #     #     rho0 = rho0 + self.compRho(o, o, 0)
-        #     phi_ortho = self.P_eps(utils.Fzero)
-        #     #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
-        #     for j in range(self.Norb): 
-        #         phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
-        #     #Compute the term \hat{rho}^0*\hat{F}^1|phi^0_i>
-        #     rhoFphi = self.P_eps(utils.Fzero)
-        #     for j in range(self.Norb):
-        #         rhoFphi += self.Fock[order][j, orb] * self.phi_prev[j][-2][0]
-        #     return -2*self.G_mu[orb]((self.Vnuc[0] + self.J[0])*self.phi_prev[orb][-2][1] - self.K[orb][1] - phi_ortho + Fphi - rhoFphi) 
-        # else: #order == 0
-
         #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
         phi_ortho = self.P_eps(utils.Fzero) 
         for orb2 in range(self.Norb):
@@ -299,12 +283,14 @@ class scfsolv:
 
 class scfsolv_1stpert(scfsolv):
     Fock1 : np.ndarray                       #1st order perturbed Fock matrix
-    Vnuc1 : vp.FunctionTree                  #1st order perturbed nuclear potential
+    Vpert : vp.FunctionTree                  #1st order perturbed nuclear potential
     J1 : vp.FunctionTree                     #1st order perturbed Coulomb potential
     K1 : list                                #list of 1st order perturbed exchange potential applied to each orbital
     phi_prev1 : list                         #list of all 1st order perturbed orbitals and their KAIN history
     f_prev1 : list                           #list of all 1st order perturbed orbitals updates and their KAIN history
     E1_n : list                              #list of perturbed orbital energies
+    pertField : np.ndarray                   #Perturbative field in vector form
+    # mu : np.ndarray                          #Dipole moment
 
     # def __init__(self, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0) -> None: 
     #     super().__init__(prec, khist, lgdrOrder, sizeScale, nboxes, scling)
@@ -326,19 +312,22 @@ class scfsolv_1stpert(scfsolv):
         self.K1 = []
         self.phi_prev1 = []
         self.f_prev1 = []
+        self.pertField = np.zeros(3)
 
-    def init_molec(self) -> None:
-        print("init_molec start")
-        self.Vnuc1 = self.P_eps(lambda r : self.f_nuc1(r)) 
-        print("Init_prout")
+    def init_molec(self, perturbativeField) -> None:
+        self.pertField = perturbativeField
+        # print("init_molec start")
+        # self.Vpert = self.P_eps(lambda r : self.f_pert(r)) 
+        self.Vpert, mu = self.f_pert()
+        # print("Init_prout")
         #initial guesses can be zero for the perturbed orbitals
         self.phi_prev1 = []
         for i in range(self.Norb):
-            self.phi_prev1.append([self.P_eps(utils.Fzero)])
+            self.phi_prev1.append([self.P_eps(utils.Fzero)]) #TODO: faire en sorte que les perturbations soient dans les trois directions --> rajouer une couche de liste
         self.f_prev1 = [[] for i in range(self.Norb)] #list of the corrections at previous steps
-        print("passed init orb")
+        # print("passed init orb")
         #Compute the Fock matrix and potential operators 
-        self.compFock()                                                         #TODO ODODODODODODOODO depuis là
+        self.compFock()                                                         
         # print("squalalala",self.Fock)
         #Energies of each orbital
         self.E1_n = []
@@ -460,14 +449,14 @@ class scfsolv_1stpert(scfsolv):
     def compFop(self, orb): #Computes the Fock operator applied to an orbital orb #TODO: modifier ça pour que ça rentre dans compFock
         Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
         # Fphi = Tphi + self.Vnuc[orderF]*self.phi_prev[orb][-1] + self.J[orderF]*self.phi_prev[orb][-1] - self.K[orb][orderF]
-        Fphi = Tphi + self.Vnuc1*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
+        Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
         return Fphi
     
     def compRho(self, orb1, orb2 ):
-        print("comp Rho", orb1, orb2)
-        print(len(self.phi_prev), len(self.phi_prev1))
+        # print("comp Rho", orb1, orb2)
+        # print(len(self.phi_prev), len(self.phi_prev1))
         rho = self.phi_prev[orb1][-1]*self.phi_prev1[orb2][-1] + self.phi_prev1[orb1][-1]*self.phi_prev[orb2][-1]
-        return rho
+        return 2*rho
 
     def computeCoulombPot(self): 
         PNbr = 4*np.pi*self.compRho(0,0)
@@ -485,6 +474,7 @@ class scfsolv_1stpert(scfsolv):
         # if order == 1:
         # print("TODODODODODODODODO")
         Fphi = self.compFop(orb) 
+        # self.Vpert = self.f_pert()
         # rho0 = self.compRho(0, 0, 0)
         # for o in range(1,self.Norb):
         #     rho0 = rho0 + self.compRho(o, o, 0)
@@ -497,14 +487,69 @@ class scfsolv_1stpert(scfsolv):
         rhoFphi = self.P_eps(utils.Fzero)
         for j in range(self.Norb):
             rhoFphi += self.Fock1[j, orb] * self.phi_prev[j][-1]
-        print(len(self.G_mu), len(self.phi_prev1), len(self.K))
-        return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev1[orb][-1] - self.K[orb] - phi_ortho + Fphi - rhoFphi) 
+        # print(len(self.G_mu), len(self.phi_prev1), len(self.K))
+        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] - self.K[orb] - phi_ortho + Fphi - rhoFphi) 
     
+    #Dipole moment and polarisability computation
+    def compDiMo(self, drct = 0):
+        # print("comp Dipole Moment")
+        rho0 = super().compRho(0, 0)
+        for orb in range(1, self.Norb):
+            rho0 += super().compRho(orb, orb)
+        # print("Pre projection")
+        r_i = self.P_eps(lambda r : utils.Flin(r, drct))
+        # print("ATTENTION: TEST/ CHANGE Fx BACK TO Flin IN compDiMo")
+        # r_i = self.P_eps(utils.Fx)
+        integrand = rho0*r_i
+        integrand.crop(self.prec)
+
+
+        tut = integrand - rho0
+        r_x = np.linspace(-5., 5., 1000)
+        phi_n_plt = [tut([x, 0.0, 0.0]) for x in r_x] 
+        plt.plot(r_x, phi_n_plt) 
+        plt.show()
+        phi_n_plt = [tut([0.0, x, 0.0]) for x in r_x]
+        plt.plot(r_x, phi_n_plt) 
+        plt.show()
+        phi_n_plt = [tut([0.0, 0.0, x]) for x in r_x]
+        plt.plot(r_x, phi_n_plt) 
+        plt.show()
+        # r_x = np.linspace(-5., 5., 1000)
+        # phi_n_plt = [rho0([x, 0.0, 0.0]) for x in r_x] 
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # phi_n_plt = [rho0([0.0, x, 0.0]) for x in r_x]
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # phi_n_plt = [rho0([0.0, 0.0, x]) for x in r_x]
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # print("badaboum")
+        # phi_n_plt = [integrand([x, 0.0, 0.0]) for x in r_x]
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # phi_n_plt = [integrand([0.0, x, 0.0]) for x in r_x]
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # phi_n_plt = [integrand([0.0, 0.0, x]) for x in r_x]
+        # plt.plot(r_x, phi_n_plt) 
+        # plt.show()
+        # print("pouet")
+
+        return -1*(integrand.integrate())
+
     #Utilities
-    def f_nuc1(self, r, factor=0.95, offset = 0.1):   
-        out = 0
-        #electron-nucleus interaction
-        for i in range(self.Nz): 
-            out += -factor*self.Z[i]/np.sqrt((r[0]-self.R[i][0])**2 + (r[1]-self.R[i][1])**2 + (r[2]-self.R[i][2])**2) + offset/self.Nz
-        return out
- 
+    def f_pert(self) -> tuple:   #TODO: Remplacer ça par un truc qui choisi les bons calculs pour la perturbation choisie 
+        #The perturbative field contribution to the energy is of the form $-\vec{\mu}\cdot\vec{\epsilon}$ 
+        out = 0 #dipole moment
+        #This loop is basically a scalar product between epsilon (represented by self.pertField) and the dipole moment mu
+        mu = np.zeros(3)
+        for direction in range(3): #3 directions: x,y and z
+            # computing the current component of the dipole moment
+            mu[direction] = self.compDiMo(direction)
+            print(f"mu_{direction} = ", mu[direction])
+            # computing the scalar product
+            out += self.pertField[direction] * mu[direction]
+        return out, mu
+  
