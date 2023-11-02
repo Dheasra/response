@@ -389,11 +389,12 @@ class scfsolv_1stpert(scfsolv):
 
         # Orthogonalise the alternate orbital history w.r.t. the unperturbed orbital
         phistory = self.orthogonalise(phistory)
-        print("TEST expandSol")
-        for i in range(len(self.phi_prev)):
-            for j in range(len(self.phi_prev1)):
-                print(f"Test: {i}, {j}", vp.dot(self.phi_prev[i][-1], self.phi_prev1[j][-1]))
+        # print("TEST expandSol")
+        # for i in range(len(self.phi_prev)):
+        #     for j in range(len(self.phi_prev1)):
+        #         print(f"Test: {i}, {j}", vp.dot(self.phi_prev[i][-1], self.phi_prev1[j][-1]))
 
+        # phi_n_ortho = []
         for orb in range(self.Norb):
             self.f_prev1[orb].append(phistory[orb] - self.phi_prev1[orb][-1])
             #Setup and solve the linear system Ac=b
@@ -405,6 +406,9 @@ class scfsolv_1stpert(scfsolv):
             #Apply correction
             phi_n = self.phi_prev1[orb][-1]
             phi_n = phi_n + delta
+            # phi_n_ortho.append([self.phi_prev1[orb][-1] + delta]) #wrong
+        # phi_n = self.orthogonalise(phi_n_ortho)  #wrong
+        # for orb in range(self.Norb): #wrong
             # #Normalize
             # norm.append(phi_n.norm())
             # phi_n.normalize()
@@ -435,11 +439,11 @@ class scfsolv_1stpert(scfsolv):
         update = np.ones(self.Norb)
         norm = np.zeros(self.Norb)
         #iteration counter
-        i = 0
+        iteration = 0
         # Optimization loop (KAIN) #TODO continuer
         while update.max() > thrs:
-            print(f"=============Iteration: {i}")
-            i += 1 
+            print(f"=============Iteration: {iteration}")
+            iteration += 1 
             self.E1_n, update = self.expandSolution()
             # print("TEST run")
             # for i in range(len(self.phi_prev)):
@@ -492,8 +496,14 @@ class scfsolv_1stpert(scfsolv):
         for j in range(1, self.Norb):
             K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compScalarPrdt(j,idx))
         return K 
+    
+    def computeUnperturbedExchangePotential(self, idx):
+        K = self.phi_prev1[0][-1]*self.Pois(4*np.pi*super().compScalarPrdt(0,idx))
+        for j in range(1, self.Norb):
+            K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*super().compScalarPrdt(j,idx))
+        return K 
 
-    def powerIter(self, orb): #TODO: C'est à moitié cassé, à corriger maintenant 
+    def powerIter_old(self, orb): #TODO: Probablement un problème dans le (1-rho0) 
         # if order == 1:
         # print("TODODODODODODODODO")
         Fphi = self.compFop(orb) 
@@ -511,7 +521,35 @@ class scfsolv_1stpert(scfsolv):
         for j in range(self.Norb):
             rhoFphi += self.Fock1[j, orb] * self.phi_prev[j][-1]
         # print(len(self.G_mu), len(self.phi_prev1), len(self.K))
-        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] - self.K[orb] - phi_ortho + Fphi - rhoFphi) 
+
+        #Compute K^0 |phi^1>
+        K0phi1 = self.computeUnperturbedExchangePotential(orb)
+        print("Test perturbed space", orb, vp.dot(Fphi - rhoFphi, self.phi_prev[orb][-1]))
+        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi - rhoFphi) 
+    
+    def powerIter(self, orb): #Devrait suivre la méthode qu'utilise MRChem plus précisément
+        # if order == 1:
+        # print("TODODODODODODODODO")
+        # self.Vpert = self.f_pert()
+        # rho0 = self.compScalarPrdt(0, 0, 0)
+        # for o in range(1,self.Norb):
+        #     rho0 = rho0 + self.compScalarPrdt(o, o, 0)
+        phi_ortho = self.P_eps(utils.Fzero)
+        #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
+        for j in range(self.Norb): 
+            # phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
+            phi_ortho = phi_ortho + self.Fock[orb, j]*self.phi_prev1[j][-1] 
+        Fphi = self.orthogonalise([[self.compFop(orb)]])[0] 
+        # #Compute the term \hat{rho}^0*\hat{F}^1|phi^0_i>
+        # rhoFphi = self.P_eps(utils.Fzero)
+        # for j in range(self.Norb):
+        #     rhoFphi += self.Fock1[j, orb] * self.phi_prev[j][-1]
+        # print(len(self.G_mu), len(self.phi_prev1), len(self.K))
+
+        #Compute K^0 |phi^1>
+        K0phi1 = self.computeUnperturbedExchangePotential(orb)
+        print("Test projection to orthogonal space", orb, vp.dot(Fphi, self.phi_prev[orb][-1]))
+        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi) 
     
     #Dipole moment and polarisability computation
     def compDiMo(self, drct = 0):
@@ -533,7 +571,7 @@ class scfsolv_1stpert(scfsolv):
         return electronContrib + nucContrib, electronContrib, nucContrib
 
     #Utilities
-    def f_pert(self) -> tuple:   #TODO: Remplacer ça par un truc qui choisi les bons calculs pour la perturbation choisie 
+    def f_pert(self) -> tuple:   #TODO: Corriger le fait que ça retourne un float plutôt qu'un functiontree
         #The perturbative field contribution to the energy is of the form $-\vec{\mu}\cdot\vec{\epsilon}$ 
         out = 0 #dipole moment
         #This loop is basically a scalar product between epsilon (represented by self.pertField) and the dipole moment mu
@@ -551,7 +589,7 @@ class scfsolv_1stpert(scfsolv):
         if phi_in == None:
             phi_in = self.phi_prev1
         S = np.zeros((self.Norb, self.Norb)) #Overlap matrix S_i,j = <Phi^i|Phi^j>
-        for i in range(self.Norb):
+        for i in range(len(phi_in)):
             for j in range(self.Norb):
                 S[i,j] = vp.dot(self.phi_prev[j][-1], phi_in[i][-1]) #compute the overlap of the current ([-1]) step
         return S
@@ -562,7 +600,7 @@ class scfsolv_1stpert(scfsolv):
         S = self.computeOverlap(phi_in)
         #Apply S' to each orbital to obtain a new orthogonal element
         phi_ortho = []
-        for i in range(self.Norb):
+        for i in range(len(phi_in)):
             # phi_tmp =  self.P_eps(utils.Fzero)
             phi_tmp =  phi_in[i][-1]
             for j in range(self.Norb):
@@ -572,3 +610,7 @@ class scfsolv_1stpert(scfsolv):
             #     phi_tmp.normalize()
             phi_ortho.append(phi_tmp)
         return phi_ortho
+
+    # def print_operators(self):
+    #     for orb1 in range(self.Norb):
+    #         for orb2 in range(self.Norb):
