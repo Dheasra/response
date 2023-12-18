@@ -339,7 +339,10 @@ class scfsolv_1stpert(scfsolv):
         self.f_prev1 = [[] for i in range(self.Norb)] #list of the corrections at previous steps
         # print("passed init orb")
         #Compute the Fock matrix and potential operators 
-        self.compFock()                                                         
+        self.compFock()
+        print("---Operators before any initial step---")
+        self.print_operators()                   
+        print("-----------------------------------")                   
         # print("squalalala",self.Fock)
         #Energies of each orbital
         self.E1_n = []
@@ -366,6 +369,13 @@ class scfsolv_1stpert(scfsolv):
         for i in range(len(self.phi_prev)):
             for j in range(len(self.phi_prev1)):
                 print(f"Test: {i}, {j}", vp.dot(self.phi_prev[i][-1], self.phi_prev1[j][-1]))
+        pert_mat = np.zeros((2,2))
+        for i in range(len(self.phi_prev)):
+            for j in range(len(self.phi_prev)):
+                pert_mat[i,j] =  vp.dot(self.phi_prev[i][-1], self.Vpert * self.phi_prev[j][-1])
+        print("pert_mat : ",pert_mat)
+
+
     
     def expandSolution(self):
         # Orthogonalise the alternate orbital history w.r.t. the unperturbed orbital in case they aren't yet
@@ -419,6 +429,8 @@ class scfsolv_1stpert(scfsolv):
             if len(self.phi_prev1[orb]) > self.khist: #deleting oldest element to save memory
                 del self.phi_prev1[orb][0]
                 del self.f_prev1[orb][0]
+        
+        self.print_operators()
         return np.array(self.E1_n),  np.array(update)
 
     def setuplinearsystem(self,orb):
@@ -474,16 +486,17 @@ class scfsolv_1stpert(scfsolv):
                 self.Fock1[i,j] = vp.dot(self.phi_prev[i][-1], Fphi)
 
     def compFop(self, orb): #Computes the Fock operator applied to an orbital orb #TODO: modifier ça pour que ça rentre dans compFock
-        Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
+        # Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
         # Fphi = Tphi + self.Vnuc[orderF]*self.phi_prev[orb][-1] + self.J[orderF]*self.phi_prev[orb][-1] - self.K[orb][orderF]
-        Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
+        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
+        Fphi = self.Vpert*self.phi_prev[orb][-1] + self.J1*self.phi_prev[orb][-1] - self.K1[orb]
         return Fphi
     
     def compScalarPrdt(self, orb1, orb2 ):
         # print("comp Rho", orb1, orb2)
         # print(len(self.phi_prev), len(self.phi_prev1))
-        rho = self.phi_prev[orb1][-1]*self.phi_prev1[orb2][-1] + self.phi_prev1[orb1][-1]*self.phi_prev[orb2][-1]
-        return 2*rho
+        rho = (self.phi_prev[orb1][-1]*self.phi_prev1[orb2][-1] + self.phi_prev1[orb1][-1]*self.phi_prev[orb2][-1])
+        return rho
 
     def computeCoulombPot(self): 
         PNbr = 4*np.pi*self.compScalarPrdt(0,0)
@@ -491,16 +504,26 @@ class scfsolv_1stpert(scfsolv):
             PNbr = PNbr + 4*np.pi*self.compScalarPrdt(orb,orb)
         return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
 
-    def computeExchangePotential(self, idx):
-        K = self.phi_prev[0][-1]*self.Pois(4*np.pi*self.compScalarPrdt(0,idx))
+    def old_computeExchangePotential(self, idx): #WARNING: this is incorrect
+        K = self.Pois(4*np.pi*self.compScalarPrdt(0,idx))*self.phi_prev[0][-1]
+        print("COMPUTE K (1): ", vp.dot(self.phi_prev[1][-1],K))
         for j in range(1, self.Norb):
-            K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compScalarPrdt(j,idx))
+            K = K + self.Pois(4*np.pi*self.compScalarPrdt(j,idx))*self.phi_prev[j][-1]
+        print("COMPUTE K (2): ", vp.dot(self.phi_prev[0][-1],self.Pois(4*np.pi*self.compScalarPrdt(idx,1))*self.phi_prev[1][-1]))
         return K 
+    
+    def computeExchangePotential(self, idx):
+        K_idx = self.phi_prev[0][-1]*self.Pois(4*np.pi*self.phi_prev1[0][-1]*self.phi_prev[idx][-1]) + self.phi_prev1[0][-1]*self.Pois(4*np.pi*self.phi_prev[0][-1]*self.phi_prev[idx][-1])
+        # print("COMPUTE K_idx (1): ", vp.dot(self.phi_prev[1][-1],K_idx))
+        for j in range(1, self.Norb): #summing over occupied orbitals
+            K_idx = K_idx + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.phi_prev1[j][-1]*self.phi_prev[idx][-1]) + self.phi_prev1[j][-1]*self.Pois(4*np.pi*self.phi_prev[j][-1]*self.phi_prev[idx][-1])
+        # print("COMPUTE K_idx (2): ", vp.dot(self.phi_prev[0][-1],self.Pois(4*np.pi*self.compScalarPrdt(idx,1))*self.phi_prev[1][-1]))
+        return K_idx 
     
     def computeUnperturbedExchangePotential(self, idx):
         K = self.phi_prev1[0][-1]*self.Pois(4*np.pi*super().compScalarPrdt(0,idx))
         for j in range(1, self.Norb):
-            K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*super().compScalarPrdt(j,idx))
+            K = K + self.phi_prev1[j][-1]*self.Pois(4*np.pi*super().compScalarPrdt(j,idx))
         return K 
 
     def powerIter_old(self, orb): #TODO: Probablement un problème dans le (1-rho0) 
@@ -513,9 +536,11 @@ class scfsolv_1stpert(scfsolv):
         #     rho0 = rho0 + self.compScalarPrdt(o, o, 0)
         phi_ortho = self.P_eps(utils.Fzero)
         #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
+        # LminusF = np.diag(self.E_n) - self.Fock
         for j in range(self.Norb): 
-            # phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
-            phi_ortho = phi_ortho + self.Fock[orb, j]*self.phi_prev1[j][-1] 
+            # phi_ortho = phi_ortho + LminusF[orb<, j]*self.phi_prev1[j][-1] 
+            if j != orb:
+                phi_ortho = phi_ortho + self.Fock[orb, j]*self.phi_prev1[j][-1] 
         #Compute the term \hat{rho}^0*\hat{F}^1|phi^0_i>
         rhoFphi = self.P_eps(utils.Fzero)
         for j in range(self.Norb):
@@ -525,7 +550,7 @@ class scfsolv_1stpert(scfsolv):
         #Compute K^0 |phi^1>
         K0phi1 = self.computeUnperturbedExchangePotential(orb)
         print("Test perturbed space", orb, vp.dot(Fphi - rhoFphi, self.phi_prev[orb][-1]))
-        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi - rhoFphi) 
+        return -2*self.G_mu[orb](self.Vnuc*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi - rhoFphi) 
     
     def powerIter(self, orb): #Devrait suivre la méthode qu'utilise MRChem plus précisément
         # if order == 1:
@@ -535,7 +560,7 @@ class scfsolv_1stpert(scfsolv):
         # for o in range(1,self.Norb):
         #     rho0 = rho0 + self.compScalarPrdt(o, o, 0)
         phi_ortho = self.P_eps(utils.Fzero)
-        #Compute the orthonormalisation constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
+        #Take into account the non-canonical constraint Sum_{j≠i} F^0_ij|phi^1_{j}>
         for j in range(self.Norb): 
             # phi_ortho = phi_ortho + self.Fock[0][orb, j]*self.phi_prev[j][-2][1] 
             phi_ortho = phi_ortho + self.Fock[orb, j]*self.phi_prev1[j][-1] 
@@ -549,39 +574,56 @@ class scfsolv_1stpert(scfsolv):
         #Compute K^0 |phi^1>
         K0phi1 = self.computeUnperturbedExchangePotential(orb)
         print("Test projection to orthogonal space", orb, vp.dot(Fphi, self.phi_prev[orb][-1]))
-        return -2*self.G_mu[orb](self.Vpert*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi) 
+        print("Test to see which one is messing everything up: Vnuc -", orb, vp.dot(self.Vnuc*self.phi_prev1[orb][-1] , self.Vnuc*self.phi_prev1[orb][-1] ))
+        print("Test to see which one is messing everything up: J", orb, vp.dot(self.J*self.phi_prev1[orb][-1] , self.J*self.phi_prev1[orb][-1] ))
+        print("Test to see which one is messing everything up: K", orb, vp.dot(K0phi1 , K0phi1 ))
+        print("Test to see which one is messing everything up: phi_ortho", orb, vp.dot(phi_ortho , phi_ortho ))
+        return -2*self.G_mu[orb](self.Vnuc*self.phi_prev1[orb][-1] + self.J*self.phi_prev1[orb][-1] - K0phi1 - phi_ortho + Fphi)
+        # return -2*self.G_mu[orb](Fphi) 
     
     #Dipole moment and polarisability computation
-    def compDiMo(self, drct = 0):
-        # print("comp Dipole Moment")
-        rho0 = 2*super().compScalarPrdt(0, 0) #Factor 2 because each orbital contains 2 electrons (closed shelldundun)
-        for orb in range(1, self.Norb):
-            rho0 += 2*super().compScalarPrdt(orb, orb)
-        # print("Pre projection")
+    def compDiMo(self, drct = 0, nuclei_width = 0): #computes the dipole moment operator
+        # # print("comp Dipole Moment")
+        # rho0 = 2*super().compScalarPrdt(0, 0) #Factor 2 because each orbital contains 2 electrons (closed shelldundun)
+        # for orb in range(1, self.Norb):
+        #     rho0 += 2*super().compScalarPrdt(orb, orb)
+        
+        # print("Pouet la girouette")
+        #The electron contribution to the dipole moment is only a position operator
         r_i = self.P_eps(lambda r : utils.Flin(r, drct))
         # print("ATTENTION: TEST/ CHANGE Fx BACK TO Flin IN compDiMo")
         # r_i = self.P_eps(utils.Fx)
-        integrand = rho0*r_i
-        integrand.crop(self.prec)
-        electronContrib = -1*(integrand.integrate())
-        #Computing nuclear contribution 
-        nucContrib = 0 
+        # integrand = rho0*r_i
+        # integrand.crop(self.prec)
+        # electronContrib = -1*(integrand.integrate())
+        electronContrib = -1*r_i #charge of an e- is -1
+        
+        # print("Bidoumpf le schtroumpf")
+        #Computing nuclear contribution (Greatly inspired by Gabriel's 'constructChargeDensity' function in MRPyCM)
+        nucContrib = vp.GaussExp() #creates a sum of Gaussian, treated like a list/array
+        if nuclei_width <= 0: 
+            nuclei_width = self.prec #The standard deviation of the Gaussian functions are of the same order of magnitude as the precision, as they effectively represent point charges
         for nuc in range(len(self.Z)):
-            nucContrib += self.Z[nuc]*self.R[nuc][drct]
-        return electronContrib + nucContrib, electronContrib, nucContrib
+            # print("Paf le taf")
+            norm_factor = (nuclei_width / np.pi)**(3./2.) #Gaussian normalisation factor. 'nuclei_width' is the exponent factor of the Gaussians 
+            # print("schplonk le tonk")
+            nucContrib.append(vp.GaussFunc(exp=nuclei_width, coef=norm_factor*self.Z[nuc], pos=self.R[nuc], pow=[0,0,0]))
+        # print("wabadubdub")
+        return electronContrib + self.P_eps(nucContrib), electronContrib, nucContrib
 
     #Utilities
     def f_pert(self) -> tuple:   #TODO: Corriger le fait que ça retourne un float plutôt qu'un functiontree
         #The perturbative field contribution to the energy is of the form $-\vec{\mu}\cdot\vec{\epsilon}$ 
-        out = 0 #dipole moment
+        out = self.P_eps(utils.Fzero) #dipole moment
         #This loop is basically a scalar product between epsilon (represented by self.pertField) and the dipole moment mu
-        mu = np.zeros(3)
+        mu = [0 for i in range(3)]
         for direction in range(3): #3 directions: x,y and z
             # computing the current component of the dipole moment
-            mu[direction], muEl, muNuc = self.compDiMo(direction)
-            print(f"mu_{direction} = ", mu[direction])
+            print("Tutututtutututututututut", len(mu))
+            mu[direction], muEl, muNuc = self.compDiMo(drct=direction, nuclei_width=0)
+            # print(f"mu_{direction} = ", mu[direction])
             # computing the scalar product
-            out += self.pertField[direction] * mu[direction]
+            out += self.pertField[direction] * mu[direction] / np.linalg.norm(self.pertField)
         return out, (mu, muEl, muNuc)
   
     def computeOverlap(self, phi_in = None): #Computes the overlap between phi_in and the unperturbed orbitals
@@ -611,6 +653,13 @@ class scfsolv_1stpert(scfsolv):
             phi_ortho.append(phi_tmp)
         return phi_ortho
 
-    # def print_operators(self):
-    #     for orb1 in range(self.Norb):
-    #         for orb2 in range(self.Norb):
+    def print_operators(self):
+        self.compFock()
+        for orb1 in range(self.Norb):
+            J1phi0 = self.J1*self.phi_prev[orb1][-1]
+            for orb2 in range(self.Norb):
+                print("Perturbed Potentials' expectation values: ", orb2, orb1)
+                print("Coulomb", vp.dot(self.phi_prev[orb2][-1], J1phi0))
+                print("Exchange", vp.dot(self.phi_prev[orb2][-1], self.K1[orb1]))
+                print("correlation", vp.dot(self.phi_prev[orb2][-1], self.phi_prev[orb1][-1]), vp.dot(self.phi_prev[orb1][-1], self.phi_prev[orb2][-1]))
+        print("Fock", self.Fock1)
