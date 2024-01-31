@@ -385,7 +385,7 @@ class scfsolv_1stpert(scfsolv):
         # for i in range(len(self.phi_prev)):
         #     for j in range(len(self.phi_prev1)):
         #         print(f"Test: {i}, {j}", vp.dot(self.phi_prev[i][-1], self.phi_prev1[j][-1]))
-        pert_mat = np.zeros((2,2))
+        pert_mat = np.zeros((self.Norb,self.Norb))
         for i in range(len(self.phi_prev)):
             for j in range(len(self.phi_prev)):
                 pert_mat[i,j] =  vp.dot(self.phi_prev[i][-1], self.Vpert * self.phi_prev[j][-1])
@@ -769,8 +769,8 @@ class scfsolv_1stpert(scfsolv):
 
     def print_operators(self):
         self.compFock()
-        coulomb = np.zeros((2,2))
-        exchange = np.zeros((2,2))
+        coulomb = np.zeros((self.Norb,self.Norb))
+        exchange = np.zeros((self.Norb,self.Norb))
         # correlation = np.zeros((2,2))
         for orb1 in range(self.Norb):
             J1phi0 = self.J1*self.phi_prev[orb1][-1]
