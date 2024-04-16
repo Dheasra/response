@@ -3,8 +3,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 # from copy import deepcopy
 
+import sys
+import os
+
+# Construct the absolute path to the directory containing the module.
+module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
+
+# Append the module path to sys.path
+sys.path.append(module_path)
+
 # import KAIN
 import utils
+from complex_fcn import complex_fcn, apply_poisson
 
 #Class containing all the methods necessary to compute and optimise ground-state orbitals
 class scfsolv:
@@ -21,7 +31,7 @@ class scfsolv:
     J : vp.FunctionTree                     #Coulomb potential
     K : list                                #list of exchange potential applied to each orbital
     phi_prev : list                         #list of all orbitals and their KAIN history
-    f_prev : list                           #list of all orbitals updates and their KAIN history
+    f_prev : list                           #list of all orbitals updates and their KAIN history 
     khist : int                             #KAIN history size 
     R : list                                #list of all coordinates of each atom
     Z : list                                #list of all atomic numbers of each atom
@@ -50,9 +60,15 @@ class scfsolv:
         self.D = vp.ABGVDerivative(self.mra, a=0.5, b=0.5)
         #Physical properties (placeholder values)
         self.Norb = 1
-        self.Fock = np.zeros((self.Norb, self.Norb))
-        self.J = self.P_eps(utils.Fzero)
-        self.Vnuc = self.P_eps(utils.Fzero)
+        self.Fock = np.zeros((self.Norb, self.Norb), dtype=complex)
+        # initialise complex-valued function trees
+        self.J = complex_fcn(self.mra)
+        self.J.setZero()
+        # Vnuc only has a real part, but we will need to 
+        self.Vnuc = complex_fcn(self.mra)
+        self.Vnuc.setZero()
+        # # Vnuc only has a real part, so we save on ressources by using a real implementation
+        # self.Vnuc = self.P_eps(utils.Fzero)
         self.K = []
         self.R = []
         self.Z = []
@@ -62,55 +78,70 @@ class scfsolv:
         self.khist = khist
         self.phi_prev = []
         self.f_prev = []
+        # #ZORA
+        # testZORA = complex_fcn(self.mra)
 
     # This method initialises all physical properties of the system.
     # No[in]: integer giving the number of orbitals. Be warned that this code currently only works for closed shell systems.
     # pos[in]: List of lists (Matrix-ish) of floating point number. The mother list contains lists (vectors) of the 3D coordinates of the each atom in the system, in atomic units.
     # Z[in]: List of integers. Each number is the atomic charge of an atom in the system. Be warned that each atoms must be ordered in the same way in pos and Z
     # init_g_dir[in]: Directory (string) of the inital guesses for the orbitals. Currently this code cannot create an initial guess, and thus needs an MRChem-compatible inital guess created from another program, such as MRChem.
-    def initMolec(self, No,  pos, Z, init_g_dir) -> None:
+    def initMolec(self, No,  pos, Z, init_g_dir) -> None: #TODO: checker pourquoi la norme de la seconde orbitale est 0
         self.Nz = len(Z)
         self.Norb = No
         self.R = pos
         self.Z = Z
-        self.Vnuc = self.P_eps(lambda r : self.f_nuc(r))
+        self.Vnuc.real = self.P_eps(lambda r : self.f_nuc(r))
         #initial guesses provided by mrchem
         self.phi_prev = []
         for i in range(self.Norb):
-            ftree = vp.FunctionTree(self.mra)
-            ftree.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
-            self.phi_prev.append([ftree])
+            phi = complex_fcn(self.mra)
+            phi.real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
+            self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
+        print("Overlap init")
+        print("S=",self.computeOverlap())
         #Compute the Fock matrix and potential operators 
         self.compFock()
+        print("Fock = ", self.Fock)
         #Energies of each orbital
         self.E_n = []
         #internal nuclear energy
         self.E_pp = self.fpp()
         # Prepare Helmholtz operators
         self.G_mu = []
+        # print("Overlap init post-fock")
+        # print("S=",self.computeOverlap())
         for i in range(self.Norb):
             self.E_n.append(self.Fock[i,i])
+            print("Energy: ", self.Fock[i, i], i)
             mu = np.sqrt(-2*self.E_n[i])
+            print("mu", mu)
             self.G_mu.append(vp.HelmholtzOperator(self.mra, mu, self.prec))  # Initalize the operator
         for orb in range(self.Norb):
             #First establish a history (at least one step) of corrections to the orbital with standard iterations with Helmholtz operator to create
             # Apply Helmholtz operator to obtain phi_np1 #5
             phi_np1 = self.powerIter(orb)
             # Compute update = ||phi^{n+1} - phi^{n}|| #6
+            # print("Post power Iter, pre normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.f_prev[orb].append(phi_np1 - self.phi_prev[orb][-1])
             phi_np1.normalize()
+            # print("Post power Iter, post normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.phi_prev[orb].append(phi_np1)
+        print("Overlap init post-powerIter")
+        print("S=",self.computeOverlap())
         #Orthonormalise orbitals since they are molecular orbitals
         phi_ortho = self.orthonormalise()
         for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
+        print("Overlap init end")
+        print("S=",self.computeOverlap())
 
     #===Computation of operators===
     
     # This method computes the Fock matrix of the system
     def compFock(self): 
-        self.Fock = np.zeros((self.Norb, self.Norb))
+        self.Fock = np.zeros((self.Norb, self.Norb), dtype=complex)
         self.K = []
         self.J = self.computeCoulombOperator()
         for j in range(self.Norb):
@@ -119,15 +150,24 @@ class scfsolv:
             Fphi = self.compFop(j)
             # compute the energy from the orbitals 
             for i in range(self.Norb):
-                self.Fock[i,j] = vp.dot(self.phi_prev[i][-1], Fphi)
+                self.Fock[i,j] = complex_fcn.dot(self.phi_prev[i][-1], Fphi)
 
     # This method computes the Fock operator applied to an orbital "orb"; returns F_\phi = \hat{F}\ket{\phi} 
     # orb[in]: integer index of the chosen orbital
     # Fphi[out]: function tree (vp.FunctionTree) representation of the operator applied to \ket{\phi[idx]}
     def compFop(self, orb): 
-        Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
-        Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] - self.K[orb]
+        # Tphi = -0.5 * self.phi_prev[orb][-1].gradient()  # Assuming gradient() returns the Laplacian
+        Tphi = -0.5 * self.phi_prev[orb][-1].derivative(0).derivative(0)
+        Tphi = Tphi - 0.5 * self.phi_prev[orb][-1].derivative(1).derivative(1)
+        Tphi = Tphi -  0.5 * self.phi_prev[orb][-1].derivative(2).derivative(2)
+        # print("types CompFop", type(self.Vnuc), type(self.J), type(self.phi_prev[orb][-1]), self.K[orb])
+        Fphi = Tphi + self.Vnuc * self.phi_prev[orb][-1] + self.J * self.phi_prev[orb][-1] - self.K[orb]
+        # print("CompFop", orb, complex_fcn.dot(self.J * self.phi_prev[orb][-1], self.J * self.phi_prev[orb][-1]))
+        # print("CompFop real", orb, vp.dot(Fphi.real, Fphi.real))
         return Fphi
+        # Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
+        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] - self.K[orb]
+        # return Fphi
 
     #Computes the product between an electron in orbital orb1 and another in orbital orb2
     # orb1[in]: integer index of the left (bra) element of the product 
@@ -142,19 +182,38 @@ class scfsolv:
     #This method computes the Coulomb operator  of the molecule
     # [out]: function tree (vp.FunctionTree) representation of the operator
     def computeCoulombOperator(self): 
+        output = complex_fcn(self.mra)
         PNbr = 4*np.pi*self.compProduct(0, 0)
         for orb in range(1, self.Norb):
             PNbr = PNbr + 4*np.pi*self.compProduct(orb, orb)
-        return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
+        # return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
+        output.real = self.Pois(2*PNbr.real)
+        output.imag = self.Pois(2*PNbr.imag)
+        return output
+    
+    #TODO continuer à partir d'ici
 
     #This method computes the exchange operator applied to an orbital of index "idx"
     # idx[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     # [out]: function tree (vp.FunctionTree) representation of the operator
     def computeExchangePotential(self, idx):
-        K = self.phi_prev[0][-1]*self.Pois(4*np.pi*self.compProduct(0, idx))
+        K = complex_fcn(self.mra)
+        Pois_term = complex_fcn(self.mra)
+        Pois_term.real = self.Pois(4*np.pi*self.compProduct(0, idx).real)
+        Pois_term.imag = self.Pois(4*np.pi*self.compProduct(0, idx).imag)
+        K.real = (self.phi_prev[0][-1]*Pois_term).real
+        K.imag = (self.phi_prev[0][-1]*Pois_term).imag
         for j in range(1, self.Norb):
-            K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compProduct(j, idx))
+            Pois_term.real = self.Pois(4*np.pi*self.compProduct(j, idx).real)
+            Pois_term.imag = self.Pois(4*np.pi*self.compProduct(j, idx).imag)
+            K.real = K.real + (self.phi_prev[j][-1]*Pois_term).real
+            K.imag = K.imag + (self.phi_prev[j][-1]*Pois_term).imag
+            # K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compProduct(j, idx))
         return K 
+        # K = self.phi_prev[0][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[0][-1].density(self.prec), self.mra, self.Pois, self.prec)
+        # for j in range(1, self.Norb):
+        #     K += self.phi_prev[j][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[j][-1].density(self.prec), self.mra, self.Pois, self.prec)
+        # return K
     
     #This is the main method of the class; it moves a step forward in the optimisation of the orbitals
     #It makes use of a KAIN accelerator to improves convergence speed.
@@ -198,12 +257,15 @@ class scfsolv:
             phi_n = self.phi_prev[orb][-1]
             phi_n = phi_n + delta
             #Normalize
-            norm.append(phi_n.norm())
+            # norm_Re  = phi_n.real.norm()
+            # norm_Im  = phi_n.imag.norm()
+            # norm.append(np.sqrt(norm_Re**2 + norm_Im**2))
+            norm.append(np.sqrt(phi_n.squaredNorm()))
             phi_n.normalize()
             #Save new orbital
             self.phi_prev[orb].append(phi_n)
             #Correction norm (convergence metric)
-            update.append(delta.norm())
+            update.append(np.sqrt(delta.squaredNorm())) 
             if len(self.phi_prev[orb]) > self.khist: #deleting oldest element to save memory
                 del self.phi_prev[orb][0]
                 del self.f_prev[orb][0]
@@ -213,13 +275,28 @@ class scfsolv:
     #orb[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     #[out]: function tree (vp.FunctionTree) representation of the updated orbital with index "orb"
     def powerIter(self, orb):
-        #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
-        phi_ortho = self.P_eps(utils.Fzero) 
+        # #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
+        # phi_ortho = self.P_eps(utils.Fzero) 
+        # for orb2 in range(self.Norb):
+        #     #Compute off-diagonal Fock matrix elements
+        #     if orb2 != orb:
+        #         phi_ortho = phi_ortho + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
+        # return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_ortho)
+        phi_ortho = complex_fcn(self.mra)  # Initialize as a complex function
         for orb2 in range(self.Norb):
-            #Compute off-diagonal Fock matrix elements
             if orb2 != orb:
-                phi_ortho = phi_ortho + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
-        return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_ortho)
+                phi_ortho = phi_ortho + self.Fock[orb, orb2] * self.phi_prev[orb2][-1]
+        phi_np1 = complex_fcn(self.mra)
+        phi_np1_tmp = (self.Vnuc + self.J) * self.phi_prev[orb][-1] - self.K[orb] - phi_ortho
+        if(phi_np1_tmp.real.squaredNorm() > 1e-12):
+            # print("PowerIter Orb ok", orb)
+            # print("PowerIter, pre Helmholtz, SCF equation", orb, complex_fcn.dot(phi_np1_tmp, phi_np1_tmp))
+            phi_np1.real = -2 * self.G_mu[orb](phi_np1_tmp.real)
+            # print("PowerIter, post Helmholtz", orb, complex_fcn.dot(phi_np1, phi_np1))
+        if(self.phi_prev[orb][-1].imag.squaredNorm() > 1e-12):
+            print("PowerIter Orb pas ok", orb)
+            phi_np1.imag = -2 * self.G_mu[orb](phi_np1_tmp.imag)
+        return phi_np1
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
     #This operation can be done independantly for each orbital as the ground state orbitals are separated.
@@ -231,13 +308,13 @@ class scfsolv:
     def setupLinearSystem(self,orb):
         lenHistory = len(self.phi_prev[orb])
         # Compute matrix A
-        A = np.zeros((lenHistory-1, lenHistory-1))
-        b = np.zeros(lenHistory-1)
+        A = np.zeros((lenHistory-1, lenHistory-1), dtype=complex)
+        b = np.zeros(lenHistory-1, dtype=complex)
         for l in range(lenHistory-1):  
             dPhi = self.phi_prev[orb][l] - self.phi_prev[orb][-1]
-            b[l] = vp.dot(dPhi, self.f_prev[orb][-1])
+            b[l] = complex_fcn.dot(dPhi, self.f_prev[orb][-1])
             for j in range(lenHistory-1):
-                A[l,j] = -vp.dot(dPhi, self.f_prev[orb][j] - self.f_prev[orb][-1])
+                A[l,j] = -complex_fcn.dot(dPhi, self.f_prev[orb][j] - self.f_prev[orb][-1])
         #solve Ac = b for c
         c = np.linalg.solve(A, b)
         return c
@@ -259,6 +336,8 @@ class scfsolv:
         while update.max() > thrs:
             print(f"=============Iteration: {i}")
             i += 1 
+            print("F=", self.Fock)
+            print("S=",self.computeOverlap())
             self.E_n, norm, update = self.expandSolution()
 
             for orb in range(self.Norb):
@@ -305,12 +384,13 @@ class scfsolv:
             length = self.Norb
         else: 
             length = len(phi_orth)
-        S = np.zeros((length, length)) #Overlap matrix S_i,j = <Phi^i|Phi^j>
+        S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
         for i in range(length):
             for j in range(i, length):
-                S[i,j] = vp.dot(phi_orth[i][-1], phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
+                S[i,j] = complex_fcn.dot(phi_orth[i][-1], phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
                 if i != j:
                     S[j,i] = np.conjugate(S[i,j])
+        # print("S", S)
         return S
 
     #Lödwin orthogonalisation and normalisation
@@ -326,6 +406,7 @@ class scfsolv:
         S = self.computeOverlap(phi_in)
         #Diagonalise S to compute S' := S^-1/2 
         eigvals, U = np.linalg.eigh(S) #U is the basis change matrix
+        print("orthonorm eigvals=", eigvals)
 
         s = np.diag(np.power(eigvals, -0.5)) #diagonalised S 
         #Compute s^-1/2
@@ -334,7 +415,9 @@ class scfsolv:
         #Apply S' to each orbital to obtain a new orthogonal element
         phi_ortho = []
         for i in range(length):
-            phi_tmp =  self.P_eps(utils.Fzero)
+            # phi_tmp =  self.P_eps(utils.Fzero)
+            phi_tmp = complex_fcn(self.mra)
+            phi_tmp.setZero()
             for j in range(length):
             # for j in range(limit[i]):
                 phi_tmp = phi_tmp + Sprime[i,j]*phi_in[j][-1]
