@@ -1,4 +1,5 @@
 from vampyr import vampyr3d as vp
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from copy import deepcopy
@@ -33,3 +34,16 @@ def Flin(r, Direction):
 
 def Fx(r):
      return r[0]
+
+def LeviCivita(indices): #Returns the value of the Levi-Civita tensor. 
+    #Indicies is an array containing the indices of the tensor we want to sample. For instance, [1 2 3] would return 1 because espilon^(1 2 3) is 1 and [2 1 3] would be -1
+    output = 1
+    # print("pouet")
+    for i in range(len(indices)):
+        for j in range(i+1, len(indices)):
+            # print(-indices[i] + indices[j])
+            output *= (-indices[i] + indices[j])
+    output *= 1/math.factorial(len(indices)-1) 
+    if len(indices)>1:
+        output *= 1/math.factorial(len(indices)-2)
+    return output

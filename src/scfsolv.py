@@ -38,6 +38,7 @@ class scfsolv:
     Nz : int                                #number of atoms
     E_pp : float                            #internal nuclear energy
     E_n : list                              #List of orbital energies
+    c : float                               #Light speed in atomic units
 
 
     # Constructor of the class
@@ -79,6 +80,7 @@ class scfsolv:
         self.phi_prev = []
         self.f_prev = []
         # #ZORA
+        self.c = 137 #in atomic units
         # testZORA = complex_fcn(self.mra)
 
     # This method initialises all physical properties of the system.
@@ -99,11 +101,13 @@ class scfsolv:
             phi.real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
             self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
-        print("Overlap init")
-        print("S=",self.computeOverlap())
+        # print("Overlap init")
+        # print("S=",self.computeOverlap())
+        # TestImag = 1j*self.phi_prev[0][-1]
+        # print("InitMolec test imag: ", complex_fcn.dot(self.phi_prev[0][-1],TestImag))
         #Compute the Fock matrix and potential operators 
         self.compFock()
-        print("Fock = ", self.Fock)
+        # print("Fock = ", self.Fock)
         #Energies of each orbital
         self.E_n = []
         #internal nuclear energy
@@ -156,18 +160,29 @@ class scfsolv:
     # orb[in]: integer index of the chosen orbital
     # Fphi[out]: function tree (vp.FunctionTree) representation of the operator applied to \ket{\phi[idx]}
     def compFop(self, orb): 
-        # Tphi = -0.5 * self.phi_prev[orb][-1].gradient()  # Assuming gradient() returns the Laplacian
-        Tphi = -0.5 * self.phi_prev[orb][-1].derivative(0).derivative(0)
-        Tphi = Tphi - 0.5 * self.phi_prev[orb][-1].derivative(1).derivative(1)
-        Tphi = Tphi -  0.5 * self.phi_prev[orb][-1].derivative(2).derivative(2)
+        #Zora potential
+        V_z = self.Vnuc + self.J
+        #constant fct f(x) = 1
+        one = complex_fcn(self.mra)
+        one.setZero()
+        one.real = self.P_eps(utils.Fone)
+        #kappa operator
+        kappa = 1/(one-V_z/(2*self.c**2)) #TODO: There will be an error here because Integer - ftree is probably not defined
+        #Kinetic operator computation 
+        #first scalar term: -0.5*kappa*nabla^2
+        kNab2 = -0.5 * kappa * self.phi_prev[orb][-1].derivative(0).derivative(0)
+        kNab2 = kNab2 - 0.5 * kappa * self.phi_prev[orb][-1].derivative(1).derivative(1)
+        kNab2 = kNab2 -  0.5 * kappa * self.phi_prev[orb][-1].derivative(2).derivative(2)
+        #second scalar term: -0.5 *nabla(kappa) * nabla
+        NabkNab = -0.5 * kappa.derivative(0) * self.phi_prev[orb][-1].derivative(0)
+        NabkNab = NabkNab -0.5 * kappa.derivative(1) * self.phi_prev[orb][-1].derivative(1)
+        NabkNab = NabkNab -0.5 * kappa.derivative(2) * self.phi_prev[orb][-1].derivative(2)
+
         # print("types CompFop", type(self.Vnuc), type(self.J), type(self.phi_prev[orb][-1]), self.K[orb])
         Fphi = Tphi + self.Vnuc * self.phi_prev[orb][-1] + self.J * self.phi_prev[orb][-1] - self.K[orb]
         # print("CompFop", orb, complex_fcn.dot(self.J * self.phi_prev[orb][-1], self.J * self.phi_prev[orb][-1]))
         # print("CompFop real", orb, vp.dot(Fphi.real, Fphi.real))
         return Fphi
-        # Tphi = -0.5*(self.D(self.D(self.phi_prev[orb][-1], 0), 0) + self.D(self.D(self.phi_prev[orb][-1], 1), 1) + self.D(self.D(self.phi_prev[orb][-1], 2), 2)) #Laplacian of the orbitals
-        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] - self.K[orb]
-        # return Fphi
 
     #Computes the product between an electron in orbital orb1 and another in orbital orb2
     # orb1[in]: integer index of the left (bra) element of the product 
