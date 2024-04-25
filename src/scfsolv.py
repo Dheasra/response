@@ -320,48 +320,57 @@ class scfsolv:
         kappa_m1 = one-V_z/(2*self.c**2)
 
         #First SCF term (Scalar kinetic term)
-        T1 = spinor(self.mra, self.Ncomp)
-        T1.setZero()
+        Term1 = spinor(self.mra, self.Ncomp)
+        Term1.setZero()
         for i in range(3): 
-            T1 = T1 -1*kappa_m1*kappa.derivative(i)*self.phi_prev[orb][-1].derivative(i)
+            Term1 = Term1 -1*kappa_m1*kappa.derivative(i)*self.phi_prev[orb][-1].derivative(i)
         
         #Second SCF term (spin-orbit kinetic term)
         # T2 = spinor(self.mra, self.Ncomp)
         # T2.setZero()
-        T2 = -1j * kappa_m1 * utils.apply_Pauli(0,-0.5*(kappa.derivative(1)*self.phi_prev[orb][-1].derivative(2)-kappa.derivative(2)*self.phi_prev[orb][-1].derivative(1)))
-        T2 = T2 - 1j * kappa_m1 * utils.apply_Pauli(1,-0.5*(kappa.derivative(2)*self.phi_prev[orb][-1].derivative(0)-kappa.derivative(0)*self.phi_prev[orb][-1].derivative(2)))
-        T2 = T2 - 1j * kappa_m1 * utils.apply_Pauli(2,-0.5*(kappa.derivative(0)*self.phi_prev[orb][-1].derivative(1)-kappa.derivative(1)*self.phi_prev[orb][-1].derivative(0)))
+        Term2 = -1j * kappa_m1 * utils.apply_Pauli(0,-0.5*(kappa.derivative(1)*self.phi_prev[orb][-1].derivative(2)-kappa.derivative(2)*self.phi_prev[orb][-1].derivative(1)))
+        Term2 = Term2 - 1j * kappa_m1 * utils.apply_Pauli(1,-0.5*(kappa.derivative(2)*self.phi_prev[orb][-1].derivative(0)-kappa.derivative(0)*self.phi_prev[orb][-1].derivative(2)))
+        Term2 = Term2 - 1j * kappa_m1 * utils.apply_Pauli(2,-0.5*(kappa.derivative(0)*self.phi_prev[orb][-1].derivative(1)-kappa.derivative(1)*self.phi_prev[orb][-1].derivative(0)))
         
         #Third SCF term (potential)
         Vkphi = (self.Vnuc + self.J)*kappa_m1*self.phi_prev[orb][-1] - self.K[orb]*kappa_m1
-        #TODO: implémenter la 2e partie du 3e terme
+        VzFphi = V_z/(2*self.c**2) * self.Fock[orb, orb] * self.phi_prev[orb][-1] 
+        Term3 = Vkphi + VzFphi
         
-        
-        #TODO: implémenter l'équation de SCF
-        # #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
-        # phi_ortho = self.P_eps(utils.Fzero) 
-        # for orb2 in range(self.Norb):
-        #     #Compute off-diagonal Fock matrix elements
-        #     if orb2 != orb:
-        #         phi_ortho = phi_ortho + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
-        # return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_ortho)
-        phi_ortho = spinor(self.mra, self.Ncomp)  # Initialize as a complex function
-        phi_ortho.setZero()
+        #Fourth SCF term (Non-canonical basis correction)
+        Term4 = self.P_eps(utils.Fzero) 
         for orb2 in range(self.Norb):
+            #Compute off-diagonal Fock matrix elements
             if orb2 != orb:
-                phi_ortho = phi_ortho + self.Fock[orb, orb2] * self.phi_prev[orb2][-1]
+                Term4 = Term4 + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
+        Term4 = Term4*kappa_m1
+
+
+        
+        # #TODO: implémenter l'équation de SCF
+        # # #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
+        # # phi_ortho = self.P_eps(utils.Fzero) 
+        # # for orb2 in range(self.Norb):
+        # #     #Compute off-diagonal Fock matrix elements
+        # #     if orb2 != orb:
+        # #         phi_ortho = phi_ortho + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
+        # # return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_ortho)
+        # phi_ortho = spinor(self.mra, self.Ncomp)  # Initialize as a complex function
+        # phi_ortho.setZero()
+        # for orb2 in range(self.Norb):
+        #     if orb2 != orb:
+        #         phi_ortho = phi_ortho + self.Fock[orb, orb2] * self.phi_prev[orb2][-1]
         phi_np1 = spinor(self.mra, self.Ncomp)
-        phi_np1.setZero()
-        phi_np1_tmp = (self.Vnuc + self.J) * self.phi_prev[orb][-1] - self.K[orb] - phi_ortho
+        phi_np1_tmp = spinor(self.mra, self.Ncomp)
+        phi_np1_tmp = Term1 + Term2 + Term3 + Term4
         for l in range(self.Ncomp):
             if(phi_np1_tmp.orbVect[l].real.squaredNorm() > 1e-12):
                 # print("PowerIter Orb ok", orb)
                 # print("PowerIter, pre Helmholtz, SCF equation", orb, complex_fcn.dot(phi_np1_tmp, phi_np1_tmp))
-                phi_np1.real = -2 * self.G_mu[orb](phi_np1_tmp.real)
+                phi_np1.orbVect[l].real = -2 * self.G_mu[orb](phi_np1_tmp.orbVect[l].real)
                 # print("PowerIter, post Helmholtz", orb, complex_fcn.dot(phi_np1, phi_np1))
             if(phi_np1_tmp.orbVect[l].imag.squaredNorm() > 1e-12):
-                print("PowerIter Orb pas ok", orb)
-                phi_np1.imag = -2 * self.G_mu[orb](phi_np1_tmp.imag)
+                phi_np1.orbVect[l].imag = -2 * self.G_mu[orb](phi_np1_tmp.orbVect[l].imag)
         return phi_np1
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
@@ -378,9 +387,9 @@ class scfsolv:
         b = np.zeros(lenHistory-1, dtype=complex)
         for l in range(lenHistory-1):  
             dPhi = self.phi_prev[orb][l] - self.phi_prev[orb][-1]
-            b[l] = complex_fcn.dot(dPhi, self.f_prev[orb][-1])
+            b[l] = dPhi.dot( self.f_prev[orb][-1])
             for j in range(lenHistory-1):
-                A[l,j] = -complex_fcn.dot(dPhi, self.f_prev[orb][j] - self.f_prev[orb][-1])
+                A[l,j] = -dPhi.dot( self.f_prev[orb][j] - self.f_prev[orb][-1])
         #solve Ac = b for c
         c = np.linalg.solve(A, b)
         return c
@@ -453,7 +462,7 @@ class scfsolv:
         S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
         for i in range(length):
             for j in range(i, length):
-                S[i,j] = complex_fcn.dot(phi_orth[i][-1], phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
+                S[i,j] = phi_orth[i][-1].dot(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
                 if i != j:
                     S[j,i] = np.conjugate(S[i,j])
         # print("S", S)
@@ -482,7 +491,7 @@ class scfsolv:
         phi_ortho = []
         for i in range(length):
             # phi_tmp =  self.P_eps(utils.Fzero)
-            phi_tmp = complex_fcn(self.mra)
+            phi_tmp = spinor(self.mra, self.Ncomp)
             phi_tmp.setZero()
             for j in range(length):
             # for j in range(limit[i]):
