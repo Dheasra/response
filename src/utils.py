@@ -5,6 +5,14 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 
 from spinor import spinor
+
+#Stuff to import complex_fcn from far away
+import sys
+import os
+# Construct the absolute path to the directory containing the module.
+module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
+# Append the module path to sys.path
+sys.path.append(module_path)
 from complex_fcn import complex_fcn
 
 
@@ -47,7 +55,7 @@ def apply_Poisson_complex(pois_op, c_fct):
 def apply_Poisson_spinor(pois_op, spin): 
     output = spinor(spin.mra,len(spin))
     for i in range(len(spin)):
-        output.orbVect[i] = apply_Poisson_complex(pois_op, spin.orbVect[i])
+        output.compVect[i] = apply_Poisson_complex(pois_op, spin.compVect[i])
     return output
 
 def  apply_Pauli(direction, spinr):

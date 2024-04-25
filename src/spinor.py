@@ -1,6 +1,14 @@
 from vampyr import vampyr3d as vp
 import numpy as np 
-import scfsolv, utils
+# import scfsolv
+
+#Stuff to import complex_fcn from far away
+import sys
+import os
+# Construct the absolute path to the directory containing the module.
+module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
+# Append the module path to sys.path
+sys.path.append(module_path)
 from complex_fcn import complex_fcn as cf 
 
 class spinor: 
@@ -18,13 +26,15 @@ class spinor:
     
     def __add__(self, other):
         output = spinor(self.mra, self.length)
-        output.compVect = self.compVect + other.compVect
+        # output.compVect = self.compVect + other.compVect
+        for i in range(self.length):
+                output.compVect[i] = other.compVect[i] + self.compVect[i]
         return output
 
     def __sub__(self, other):
-        output = spinor(self.mra, self.length)
-        output.compVect = self.compVect - other.compVect
-        return output
+        # output = spinor(self.mra, self.length)
+        # output.compVect = self.compVect - other.compVect
+        return self + (-1)*other
     
     def __rmul__(self, other):
         # output = spinor(self.mra, self.length)
@@ -41,7 +51,9 @@ class spinor:
         # output.compVect = factor * self.compVect
         output = spinor(self.mra, self.length)
         if type(other) == float or type(other) == int or type(other) == complex: 
-            output.compVect = other * self.compVect
+            # output.compVect = other * self.compVect
+            for i in range(self.length):
+                output.compVect[i] = other*self.compVect[i]
         elif type(other) == spinor: 
             for i in range(self.length):
                 output.compVect[i] = other.compVect[i]*self.compVect[i]
@@ -53,7 +65,16 @@ class spinor:
         elif type(other) == spinor: 
             output = spinor(self.mra, self.length)
             for i in range(self.length):
-                output.compVect[i] = self.compVect[i]/other
+                output.compVect[i].real = self.compVect[i].real*(other.compVect[i].real**(-1))
+                output.compVect[i].imag = self.compVect[i].imag*(other.compVect[i].imag**(-1))
+            return output
+
+    def __pow__(self,exponent):
+        output = spinor(self.mra, self.length)
+        for i in range(self.length):
+            output.compVect[i].real = self.compVect[i].real**(exponent)
+            output.compVect[i].imag = self.compVect[i].imag**(exponent)
+        return output
 
     def compSqNorm(self): 
         norm = 0
@@ -85,7 +106,7 @@ class spinor:
         output = spinor(self.mra, self.length)
         for i in range(self.length):
             output.compVect[i] = self.compVect[i].derivative(direction, der)
-        return der
+        return output
         
     # def invert(self)
     #     one = spinor(self.mra, self.length)

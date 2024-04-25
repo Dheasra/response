@@ -3,12 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 # from copy import deepcopy
 
+
+#Stuff to import complex_fcn from far away
 import sys
 import os
-
 # Construct the absolute path to the directory containing the module.
 module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
-
 # Append the module path to sys.path
 sys.path.append(module_path)
 
@@ -101,6 +101,7 @@ class scfsolv:
         self.phi_prev = []
         for i in range(self.Norb):
             phi = spinor(self.mra, self.Ncomp) #TODO: CONTINUER À PARTIR D'ICI
+            phi.setZero()
             phi.compVect[0].real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re")  #TODO 2C
             self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
@@ -172,7 +173,7 @@ class scfsolv:
         for j in range(self.Ncomp):
             one.compVect[j].real = self.P_eps(utils.Fone)
         #kappa operator
-        kappa = one/(one-V_z/(2*self.c**2)) #TODO: There will be an error here because Integer - ftree is probably not defined
+        kappa = (one-V_z/(2*self.c**2))**(-1) #TODO: There will be an error here because Integer - ftree is probably not defined
         #Kinetic operator computation 
         #first scalar term: -0.5*kappa*nabla^2
         kNab2 = -0.5 * kappa * self.phi_prev[orb][-1].derivative(0).derivative(0)
@@ -316,8 +317,8 @@ class scfsolv:
         for j in range(self.Ncomp):
             one.compVect[j].real = self.P_eps(utils.Fone)
         #kappa operator
-        kappa = one/(one-V_z/(2*self.c**2))
         kappa_m1 = one-V_z/(2*self.c**2)
+        kappa = kappa_m1**(-1)
 
         #First SCF term (Scalar kinetic term)
         Term1 = spinor(self.mra, self.Ncomp)
@@ -364,13 +365,13 @@ class scfsolv:
         phi_np1_tmp = spinor(self.mra, self.Ncomp)
         phi_np1_tmp = Term1 + Term2 + Term3 + Term4
         for l in range(self.Ncomp):
-            if(phi_np1_tmp.orbVect[l].real.squaredNorm() > 1e-12):
+            if(phi_np1_tmp.compVect[l].real.squaredNorm() > 1e-12):
                 # print("PowerIter Orb ok", orb)
                 # print("PowerIter, pre Helmholtz, SCF equation", orb, complex_fcn.dot(phi_np1_tmp, phi_np1_tmp))
-                phi_np1.orbVect[l].real = -2 * self.G_mu[orb](phi_np1_tmp.orbVect[l].real)
+                phi_np1.compVect[l].real = -2 * self.G_mu[orb](phi_np1_tmp.compVect[l].real)
                 # print("PowerIter, post Helmholtz", orb, complex_fcn.dot(phi_np1, phi_np1))
-            if(phi_np1_tmp.orbVect[l].imag.squaredNorm() > 1e-12):
-                phi_np1.orbVect[l].imag = -2 * self.G_mu[orb](phi_np1_tmp.orbVect[l].imag)
+            if(phi_np1_tmp.compVect[l].imag.squaredNorm() > 1e-12):
+                phi_np1.compVect[l].imag = -2 * self.G_mu[orb](phi_np1_tmp.compVect[l].imag)
         return phi_np1
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
