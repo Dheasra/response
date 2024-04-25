@@ -15,6 +15,7 @@ sys.path.append(module_path)
 # import KAIN
 import utils
 from complex_fcn import complex_fcn, apply_poisson
+from spinor import spinor
 
 #Class containing all the methods necessary to compute and optimise ground-state orbitals
 class scfsolv:
@@ -39,6 +40,7 @@ class scfsolv:
     E_pp : float                            #internal nuclear energy
     E_n : list                              #List of orbital energies
     c : float                               #Light speed in atomic units
+    Ncomp : int                             #Number of components of the spinors
 
 
     # Constructor of the class
@@ -51,7 +53,7 @@ class scfsolv:
     # sizeScale[in]: integer setting the unit scale of each box
     # nboxes[in]: integer setting the initial number of boxes. Remember that in 3d, space must be discretised in boxes.
     # scling[in]: floating point number doing something that I don't remember what it is. I confuse it with scale. Leaving it at 1.0 never failed me though.
-    def __init__(self, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0) -> None:
+    def __init__(self, Ncomponents, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0) -> None:
         self.world = vp.BoundingBox(corner=[-1]*3, nboxes=[nboxes]*3, scaling=[scling]*3, scale= sizeScale)
         self.mra = vp.MultiResolutionAnalysis(order=lgdrOrder, box=self.world)
         self.prec = prec
@@ -63,12 +65,11 @@ class scfsolv:
         self.Norb = 1
         self.Fock = np.zeros((self.Norb, self.Norb), dtype=complex)
         # initialise complex-valued function trees
-        self.J = complex_fcn(self.mra)
+        self.J = spinor(self.mra, Ncomponents)
         self.J.setZero()
-        # Vnuc only has a real part, but we will need to 
-        self.Vnuc = complex_fcn(self.mra)
+        # # Vnuc only has a real part, but I am not creating a real-valued spinor class
+        self.Vnuc = spinor(self.mra, Ncomponents)
         self.Vnuc.setZero()
-        # # Vnuc only has a real part, so we save on ressources by using a real implementation
         # self.Vnuc = self.P_eps(utils.Fzero)
         self.K = []
         self.R = []
@@ -80,7 +81,8 @@ class scfsolv:
         self.phi_prev = []
         self.f_prev = []
         # #ZORA
-        self.c = 137 #in atomic units
+        self.c = 137.02 #in atomic units
+        self.Ncomp = Ncomponents
         # testZORA = complex_fcn(self.mra)
 
     # This method initialises all physical properties of the system.
@@ -88,17 +90,18 @@ class scfsolv:
     # pos[in]: List of lists (Matrix-ish) of floating point number. The mother list contains lists (vectors) of the 3D coordinates of the each atom in the system, in atomic units.
     # Z[in]: List of integers. Each number is the atomic charge of an atom in the system. Be warned that each atoms must be ordered in the same way in pos and Z
     # init_g_dir[in]: Directory (string) of the inital guesses for the orbitals. Currently this code cannot create an initial guess, and thus needs an MRChem-compatible inital guess created from another program, such as MRChem.
-    def initMolec(self, No,  pos, Z, init_g_dir) -> None: #TODO: checker pourquoi la norme de la seconde orbitale est 0
+    def initMolec(self, No,  pos, Z, init_g_dir) -> None: 
         self.Nz = len(Z)
         self.Norb = No
         self.R = pos
         self.Z = Z
-        self.Vnuc.real = self.P_eps(lambda r : self.f_nuc(r))
+        for i in range(len(self.Vnuc)):
+            self.Vnuc.compVect[i].real = self.P_eps(lambda r : self.f_nuc(r))
         #initial guesses provided by mrchem
         self.phi_prev = []
         for i in range(self.Norb):
-            phi = complex_fcn(self.mra)
-            phi.real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
+            phi = spinor(self.mra, self.Ncomp) #TODO: CONTINUER À PARTIR D'ICI
+            phi.compVect[0].real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re")  #TODO 2C
             self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Norb)] #list of the corrections at previous steps
         # print("Overlap init")
@@ -118,9 +121,9 @@ class scfsolv:
         # print("S=",self.computeOverlap())
         for i in range(self.Norb):
             self.E_n.append(self.Fock[i,i])
-            print("Energy: ", self.Fock[i, i], i)
+            # print("Energy: ", self.Fock[i, i], i)
             mu = np.sqrt(-2*self.E_n[i])
-            print("mu", mu)
+            # print("mu", mu)
             self.G_mu.append(vp.HelmholtzOperator(self.mra, mu, self.prec))  # Initalize the operator
         for orb in range(self.Norb):
             #First establish a history (at least one step) of corrections to the orbital with standard iterations with Helmholtz operator to create
@@ -132,14 +135,14 @@ class scfsolv:
             phi_np1.normalize()
             # print("Post power Iter, post normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.phi_prev[orb].append(phi_np1)
-        print("Overlap init post-powerIter")
-        print("S=",self.computeOverlap())
+        # print("Overlap init post-powerIter")
+        # print("S=",self.computeOverlap())
         #Orthonormalise orbitals since they are molecular orbitals
         phi_ortho = self.orthonormalise()
         for orb in range(self.Norb): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
-        print("Overlap init end")
-        print("S=",self.computeOverlap())
+        # print("Overlap init end")
+        # print("S=",self.computeOverlap())
 
     #===Computation of operators===
     
@@ -154,7 +157,8 @@ class scfsolv:
             Fphi = self.compFop(j)
             # compute the energy from the orbitals 
             for i in range(self.Norb):
-                self.Fock[i,j] = complex_fcn.dot(self.phi_prev[i][-1], Fphi)
+                # self.Fock[i,j] = complex_fcn.dot(self.phi_prev[i][-1], Fphi) #TODO 2C
+                self.Fock[i,j] = self.phi_prev[i][-1].dot(Fphi) 
 
     # This method computes the Fock operator applied to an orbital "orb"; returns F_\phi = \hat{F}\ket{\phi} 
     # orb[in]: integer index of the chosen orbital
@@ -163,11 +167,12 @@ class scfsolv:
         #Zora potential
         V_z = self.Vnuc + self.J
         #constant fct f(x) = 1
-        one = complex_fcn(self.mra)
+        one = spinor(self.mra, self.Ncomp)
         one.setZero()
-        one.real = self.P_eps(utils.Fone)
+        for j in range(self.Ncomp):
+            one.compVect[j].real = self.P_eps(utils.Fone)
         #kappa operator
-        kappa = 1/(one-V_z/(2*self.c**2)) #TODO: There will be an error here because Integer - ftree is probably not defined
+        kappa = one/(one-V_z/(2*self.c**2)) #TODO: There will be an error here because Integer - ftree is probably not defined
         #Kinetic operator computation 
         #first scalar term: -0.5*kappa*nabla^2
         kNab2 = -0.5 * kappa * self.phi_prev[orb][-1].derivative(0).derivative(0)
@@ -177,7 +182,13 @@ class scfsolv:
         NabkNab = -0.5 * kappa.derivative(0) * self.phi_prev[orb][-1].derivative(0)
         NabkNab = NabkNab -0.5 * kappa.derivative(1) * self.phi_prev[orb][-1].derivative(1)
         NabkNab = NabkNab -0.5 * kappa.derivative(2) * self.phi_prev[orb][-1].derivative(2)
-
+        #--spin orbit term--
+        #x direction
+        sporb = 1j * utils.apply_Pauli(0,-0.5*(kappa.derivative(1)*self.phi_prev[orb][-1].derivative(2)-kappa.derivative(2)*self.phi_prev[orb][-1].derivative(1)))
+        sporb = sporb + 1j * utils.apply_Pauli(1,-0.5*(kappa.derivative(2)*self.phi_prev[orb][-1].derivative(0)-kappa.derivative(0)*self.phi_prev[orb][-1].derivative(2)))
+        sporb = sporb + 1j * utils.apply_Pauli(2,-0.5*(kappa.derivative(0)*self.phi_prev[orb][-1].derivative(1)-kappa.derivative(1)*self.phi_prev[orb][-1].derivative(0)))
+        #Total kinetic operator
+        Tphi = kNab2 + NabkNab + sporb
         # print("types CompFop", type(self.Vnuc), type(self.J), type(self.phi_prev[orb][-1]), self.K[orb])
         Fphi = Tphi + self.Vnuc * self.phi_prev[orb][-1] + self.J * self.phi_prev[orb][-1] - self.K[orb]
         # print("CompFop", orb, complex_fcn.dot(self.J * self.phi_prev[orb][-1], self.J * self.phi_prev[orb][-1]))
@@ -197,39 +208,46 @@ class scfsolv:
     #This method computes the Coulomb operator  of the molecule
     # [out]: function tree (vp.FunctionTree) representation of the operator
     def computeCoulombOperator(self): 
-        output = complex_fcn(self.mra)
+        # output = spinor(self.mra, self.Ncomp)
         PNbr = 4*np.pi*self.compProduct(0, 0)
         for orb in range(1, self.Norb):
             PNbr = PNbr + 4*np.pi*self.compProduct(orb, orb)
         # return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
-        output.real = self.Pois(2*PNbr.real)
-        output.imag = self.Pois(2*PNbr.imag)
-        return output
+        # output.real = self.Pois(2*PNbr.real)
+        # output.imag = self.Pois(2*PNbr.imag)
+        return utils.apply_Poisson_spinor(self.Pois, PNbr)
+        # return output
     
-    #TODO continuer à partir d'ici
 
     #This method computes the exchange operator applied to an orbital of index "idx"
     # idx[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     # [out]: function tree (vp.FunctionTree) representation of the operator
     def computeExchangePotential(self, idx):
-        K = complex_fcn(self.mra)
-        Pois_term = complex_fcn(self.mra)
-        Pois_term.real = self.Pois(4*np.pi*self.compProduct(0, idx).real)
-        Pois_term.imag = self.Pois(4*np.pi*self.compProduct(0, idx).imag)
-        K.real = (self.phi_prev[0][-1]*Pois_term).real
-        K.imag = (self.phi_prev[0][-1]*Pois_term).imag
-        for j in range(1, self.Norb):
-            Pois_term.real = self.Pois(4*np.pi*self.compProduct(j, idx).real)
-            Pois_term.imag = self.Pois(4*np.pi*self.compProduct(j, idx).imag)
-            K.real = K.real + (self.phi_prev[j][-1]*Pois_term).real
-            K.imag = K.imag + (self.phi_prev[j][-1]*Pois_term).imag
-            # K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compProduct(j, idx))
-        return K 
+        # K = complex_fcn(self.mra)
+        # Pois_term = complex_fcn(self.mra)
+        # Pois_term.real = self.Pois(4*np.pi*self.compProduct(0, idx).real)
+        # Pois_term.imag = self.Pois(4*np.pi*self.compProduct(0, idx).imag)
+        # K.real = (self.phi_prev[0][-1]*Pois_term).real
+        # K.imag = (self.phi_prev[0][-1]*Pois_term).imag
+        # for j in range(1, self.Norb):
+        #     Pois_term.real = self.Pois(4*np.pi*self.compProduct(j, idx).real)
+        #     Pois_term.imag = self.Pois(4*np.pi*self.compProduct(j, idx).imag)
+        #     K.real = K.real + (self.phi_prev[j][-1]*Pois_term).real
+        #     K.imag = K.imag + (self.phi_prev[j][-1]*Pois_term).imag
+        #     # K = K + self.phi_prev[j][-1]*self.Pois(4*np.pi*self.compProduct(j, idx))
+        # return K 
+        K = spinor(self.mra, self.Ncomp)
+        K.setZero()
+        for j in range(self.Norb):
+            K = self.phi_prev[j][-1] * utils.apply_Poisson_spinor(self.Pois, 4*np.pi*self.compProduct(j, idx))
+        return K
         # K = self.phi_prev[0][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[0][-1].density(self.prec), self.mra, self.Pois, self.prec)
         # for j in range(1, self.Norb):
         #     K += self.phi_prev[j][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[j][-1].density(self.prec), self.mra, self.Pois, self.prec)
         # return K
     
+    #TODO: continuer ici
+
     #This is the main method of the class; it moves a step forward in the optimisation of the orbitals
     #It makes use of a KAIN accelerator to improves convergence speed.
     #The updated orbitals and history are stored in the class' attributes, and deleted when too old in the history.
@@ -290,6 +308,36 @@ class scfsolv:
     #orb[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     #[out]: function tree (vp.FunctionTree) representation of the updated orbital with index "orb"
     def powerIter(self, orb):
+         #Zora potential
+        V_z = self.Vnuc + self.J
+        #constant fct f(x) = 1
+        one = spinor(self.mra, self.Ncomp)
+        one.setZero()
+        for j in range(self.Ncomp):
+            one.compVect[j].real = self.P_eps(utils.Fone)
+        #kappa operator
+        kappa = one/(one-V_z/(2*self.c**2))
+        kappa_m1 = one-V_z/(2*self.c**2)
+
+        #First SCF term (Scalar kinetic term)
+        T1 = spinor(self.mra, self.Ncomp)
+        T1.setZero()
+        for i in range(3): 
+            T1 = T1 -1*kappa_m1*kappa.derivative(i)*self.phi_prev[orb][-1].derivative(i)
+        
+        #Second SCF term (spin-orbit kinetic term)
+        # T2 = spinor(self.mra, self.Ncomp)
+        # T2.setZero()
+        T2 = -1j * kappa_m1 * utils.apply_Pauli(0,-0.5*(kappa.derivative(1)*self.phi_prev[orb][-1].derivative(2)-kappa.derivative(2)*self.phi_prev[orb][-1].derivative(1)))
+        T2 = T2 - 1j * kappa_m1 * utils.apply_Pauli(1,-0.5*(kappa.derivative(2)*self.phi_prev[orb][-1].derivative(0)-kappa.derivative(0)*self.phi_prev[orb][-1].derivative(2)))
+        T2 = T2 - 1j * kappa_m1 * utils.apply_Pauli(2,-0.5*(kappa.derivative(0)*self.phi_prev[orb][-1].derivative(1)-kappa.derivative(1)*self.phi_prev[orb][-1].derivative(0)))
+        
+        #Third SCF term (potential)
+        Vkphi = (self.Vnuc + self.J)*kappa_m1*self.phi_prev[orb][-1] - self.K[orb]*kappa_m1
+        #TODO: implémenter la 2e partie du 3e terme
+        
+        
+        #TODO: implémenter l'équation de SCF
         # #Compute phi_ortho := Sum_{j!=i} F_ij*phi_j 
         # phi_ortho = self.P_eps(utils.Fzero) 
         # for orb2 in range(self.Norb):
@@ -297,20 +345,23 @@ class scfsolv:
         #     if orb2 != orb:
         #         phi_ortho = phi_ortho + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
         # return -2*self.G_mu[orb]((self.Vnuc + self.J)*self.phi_prev[orb][-1] - self.K[orb] - phi_ortho)
-        phi_ortho = complex_fcn(self.mra)  # Initialize as a complex function
+        phi_ortho = spinor(self.mra, self.Ncomp)  # Initialize as a complex function
+        phi_ortho.setZero()
         for orb2 in range(self.Norb):
             if orb2 != orb:
                 phi_ortho = phi_ortho + self.Fock[orb, orb2] * self.phi_prev[orb2][-1]
-        phi_np1 = complex_fcn(self.mra)
+        phi_np1 = spinor(self.mra, self.Ncomp)
+        phi_np1.setZero()
         phi_np1_tmp = (self.Vnuc + self.J) * self.phi_prev[orb][-1] - self.K[orb] - phi_ortho
-        if(phi_np1_tmp.real.squaredNorm() > 1e-12):
-            # print("PowerIter Orb ok", orb)
-            # print("PowerIter, pre Helmholtz, SCF equation", orb, complex_fcn.dot(phi_np1_tmp, phi_np1_tmp))
-            phi_np1.real = -2 * self.G_mu[orb](phi_np1_tmp.real)
-            # print("PowerIter, post Helmholtz", orb, complex_fcn.dot(phi_np1, phi_np1))
-        if(self.phi_prev[orb][-1].imag.squaredNorm() > 1e-12):
-            print("PowerIter Orb pas ok", orb)
-            phi_np1.imag = -2 * self.G_mu[orb](phi_np1_tmp.imag)
+        for l in range(self.Ncomp):
+            if(phi_np1_tmp.orbVect[l].real.squaredNorm() > 1e-12):
+                # print("PowerIter Orb ok", orb)
+                # print("PowerIter, pre Helmholtz, SCF equation", orb, complex_fcn.dot(phi_np1_tmp, phi_np1_tmp))
+                phi_np1.real = -2 * self.G_mu[orb](phi_np1_tmp.real)
+                # print("PowerIter, post Helmholtz", orb, complex_fcn.dot(phi_np1, phi_np1))
+            if(phi_np1_tmp.orbVect[l].imag.squaredNorm() > 1e-12):
+                print("PowerIter Orb pas ok", orb)
+                phi_np1.imag = -2 * self.G_mu[orb](phi_np1_tmp.imag)
         return phi_np1
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
