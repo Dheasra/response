@@ -26,6 +26,7 @@ class spinor:
     
     def __add__(self, other):
         output = spinor(self.mra, self.length)
+        output.setZero()
         # output.compVect = self.compVect + other.compVect
         for i in range(self.length):
                 output.compVect[i] = other.compVect[i] + self.compVect[i]
@@ -55,8 +56,10 @@ class spinor:
             for i in range(self.length):
                 output.compVect[i] = other*self.compVect[i]
         elif type(other) == spinor: 
+            # print("spinor element-wise mult")
             for i in range(self.length):
                 output.compVect[i] = other.compVect[i]*self.compVect[i]
+            # print("mult norm", output.dot(output))
         return output 
     
     def __truediv__(self, other):
@@ -72,12 +75,25 @@ class spinor:
     def __pow__(self,exponent):
         output = spinor(self.mra, self.length)
         for i in range(self.length):
-            output.compVect[i].real = self.compVect[i].real**(exponent)
-            output.compVect[i].imag = self.compVect[i].imag**(exponent)
+            if np.sqrt(self.compVect[i].real.squaredNorm()) > 1e-12:
+                print("power spinor real")
+                print(self.compVect[i].squaredNorm())
+                print("power spinor real tut")
+                output.compVect[i].real = self.compVect[i].real**(exponent)
+                print("print spinor real ok")
+            if np.sqrt(self.compVect[i].imag.squaredNorm()) > 1e-12:
+                print("power spinor imag")
+                output.compVect[i].imag = self.compVect[i].imag**(exponent)
+        print("power spinor done")
         return output
+    
+    def __call__(self,component,  r): #r is the position 3-vector
+        realval = self.compVect[component].real(r) 
+        imagval = self.compVect[component].imag(r) 
+        return realval + 1j*imagval
 
     def compSqNorm(self): 
-        norm = 0
+        norm = 0.0
         for i in range(self.length):
             norm += self.compVect[i].squaredNorm()
         return norm 
@@ -90,11 +106,13 @@ class spinor:
         # output = spinor(self.mra, self.length)
         norm = self.compNorm()
         for i in range(self.length):
-            self.compVect[i] = self.compVect[i]/norm
+            if norm > 1e-12:
+                self.compVect[i] = self.compVect[i]/norm
 
     def dot(self, other):
         output = 0.
         for i in range(self.length):
+            # print("spinor dot")
             output += cf.dot(self.compVect[i], other.compVect[i])
         return output
     
@@ -102,10 +120,22 @@ class spinor:
         for i in range(self.length):
             self.compVect[i].setZero()
 
-    def derivative(self, direction, der = "ABGV"):
+    def derivative(self, direction, der = "BS"):
+        output = spinor(self.mra, self.length)
+        output.setZero()
+        for i in range(self.length):
+            if np.sqrt(self.compVect[i].squaredNorm()) > 1e-12:
+                # print("derivative")
+                output.compVect[i] = self.compVect[i].derivative(direction, der)
+                # print("derivative", type(output.compVect[i]))
+        return output
+    
+    def crop(self, prec): #Removes unnecessary leaves that are left after multiplying trees
         output = spinor(self.mra, self.length)
         for i in range(self.length):
-            output.compVect[i] = self.compVect[i].derivative(direction, der)
+            #This formulation should allow for this function to be called on both newly defined spinors and also the same way as the crop function of trees. 
+            self.compVect[i].crop(prec) 
+            output.compVect[i] = self.compVect[i]
         return output
         
     # def invert(self)
