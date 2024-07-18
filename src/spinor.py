@@ -51,7 +51,8 @@ class spinor:
         # output = spinor(self.mra, self.length)
         # output.compVect = factor * self.compVect
         output = spinor(self.mra, self.length)
-        if type(other) == float or type(other) == int or type(other) == complex: 
+        if type(other) == float or type(other) == int or type(other) == complex or type(other) == np.complex128 :
+            # print("tut")
             # output.compVect = other * self.compVect
             for i in range(self.length):
                 output.compVect[i] = other*self.compVect[i]
@@ -91,6 +92,9 @@ class spinor:
         realval = self.compVect[component].real(r) 
         imagval = self.compVect[component].imag(r) 
         return realval + 1j*imagval
+    
+    # def __getitem__(self, component):
+    #     return self.compVect[component]
 
     def compSqNorm(self): 
         norm = 0.0
@@ -112,6 +116,13 @@ class spinor:
     def dot(self, other):
         output = 0.
         for i in range(self.length):
+            # print("spinor dot")
+            output += cf.dot(self.compVect[i], other.compVect[i])
+        return output
+    
+    def kramerDot(self, other, spin_type = 0):
+        output = 0.
+        for i in range(spin_type, self.length, 2):
             # print("spinor dot")
             output += cf.dot(self.compVect[i], other.compVect[i])
         return output

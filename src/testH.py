@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from scfsolv import scfsolv
 
-#modified remrchem
+#modified remrchem file
 def gs_D_1e(spinorb1, potential, mra, prec, thr, derivative):
     print('One-electron calculations')
     
