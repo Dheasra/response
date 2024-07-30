@@ -120,12 +120,50 @@ class spinor:
             output += cf.dot(self.compVect[i], other.compVect[i])
         return output
     
-    def kramerDot(self, other, spin_type = 0):
-        output = 0.
-        for i in range(spin_type, self.length, 2):
-            # print("spinor dot")
-            output += cf.dot(self.compVect[i], other.compVect[i])
-        return output
+    def dotKramer(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
+        if self.length > 1:
+            output = 0.
+            for i in range(0, self.length, 2):
+                # print("spinor dot")
+                # output += -1*cf.dot(self.compVect[2*i], other.conjugateComponent(2*i+1))
+                # output += cf.dot(self.compVect[2*i+1], other.conjugateComponent(2*i))
+                output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1])
+                output += cf.dot(self.conjugateComponent(2*i+1), other.compVect[2*i])
+            return output
+        else:
+            return self.dot(other)
+        
+    def multKramer(self, other):
+        # output = spinor(self.mra, self.length)
+        # conj_other = other.conjugate()
+        if self.length > 1:
+            output = spinor(self.mra, self.length)
+            for i in range(0, self.length, 2):
+                # print("spinor dot")
+                output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
+                output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.compVect[2*i]
+            return output
+        else:
+            return self * other
+        
+    def conjugate(self):
+        conj = self
+        for i in range(self.length):
+            conj.compVect[i] = self.conjugateComponent(i)
+        return conj
+
+    def conjugateComponent(self, idx):
+        conj_comp = self.compVect[idx]
+        conj_comp.imag *= -1
+        return conj_comp
+
+    
+    # def kramerDot(self, other, spin_type = 0):
+    #     output = 0.
+    #     for i in range(spin_type, self.length, 2):
+    #         # print("spinor dot")
+    #         output += cf.dot(self.compVect[i], other.compVect[i])
+    #     return output
     
     def setZero(self):
         for i in range(self.length):
