@@ -96,6 +96,13 @@ class spinor:
     # def __getitem__(self, component):
     #     return self.compVect[component]
 
+    def reproject(self, proj_op):
+        output = spinor(self.mra, self.length)
+        for comp in range(self.length):
+            output.compVect[comp].real = proj_op(lambda r : self.compVect[comp].real(r))
+            output.compVect[comp].imag = proj_op(lambda r : self.compVect[comp].imag(r))
+        return output
+
     def compSqNorm(self): 
         norm = 0.0
         for i in range(self.length):
@@ -127,7 +134,7 @@ class spinor:
                 # print("spinor dot")
                 # output += -1*cf.dot(self.compVect[2*i], other.conjugateComponent(2*i+1))
                 # output += cf.dot(self.compVect[2*i+1], other.conjugateComponent(2*i))
-                output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1])
+                output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1]) #TODO: maybe broken, see multKramer for possibly the non-broken version
                 output += cf.dot(self.conjugateComponent(2*i+1), other.compVect[2*i])
             return output
         else:
@@ -140,8 +147,10 @@ class spinor:
             output = spinor(self.mra, self.length)
             for i in range(0, self.length, 2):
                 # print("spinor dot")
-                output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
-                output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.compVect[2*i]
+                # output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
+                # output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.compVect[2*i]
+                output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.conjugateComponent(2*i+1)
+                output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.conjugateComponent(2*i)
             return output
         else:
             return self * other

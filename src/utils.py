@@ -98,25 +98,33 @@ def LeviCivita(indices): #Returns the value of the Levi-Civita tensor.
         output *= 1/math.factorial(len(indices)-2)
     return output
 
-def is_constant(cplx_fct, threshold = 1e-8): 
+def is_constant(cplx_fct, threshold = 1e-8, target_value = None): 
     r_x = np.linspace(-5., 5., 1000)
     realx = [cplx_fct.real([x, 0.0, 0.0]) for x in r_x]
+    avrgx = np.average(realx)
     realy = [cplx_fct.real([0.0, x, 0.0]) for x in r_x]
+    avrgy = np.average(realy)
     realz = [cplx_fct.real([0.0, 0.0, x]) for x in r_x]
+    avrgz = np.average(realz)
     imagx = [cplx_fct.imag([x, 0.0, 0.0]) for x in r_x]
+    avrgix = np.average(imagx)
     imagy = [cplx_fct.imag([0.0, x, 0.0]) for x in r_x]
+    avrgiy = np.average(imagy)
     imagz = [cplx_fct.imag([0.0, 0.0, x]) for x in r_x]
+    avrgiz = np.average(imagz)
+    if target_value != None:
+        avrgx, avrgy, avrgz, avrgix, avrgiy, avrgiz = target_value, target_value, target_value, target_value, target_value, target_value
     for i in range(1,len(r_x)):
-        if np.abs(realx[i-1]-realx[i]) > threshold:
+        if np.abs(realx[i]-avrgx) > threshold:
             return False
-        if np.abs(realy[i-1]-realy[i]) > threshold:
+        if np.abs(realy[i]-avrgy) > threshold:
             return False
-        if np.abs(realz[i-1]-realz[i]) > threshold:
+        if np.abs(realz[i]-avrgz) > threshold:
             return False
-        if np.abs(imagx[i-1]-imagx[i]) > threshold:
+        if np.abs(imagx[i]-avrgix) > threshold:
             return False
-        if np.abs(imagy[i-1]-imagy[i]) > threshold:
+        if np.abs(imagy[i]-avrgiy) > threshold:
             return False
-        if np.abs(imagz[i-1]-imagz[i]) > threshold:
+        if np.abs(imagz[i]-avrgiz) > threshold:
             return False
     return True
