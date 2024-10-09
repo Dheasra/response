@@ -8,9 +8,9 @@ from copy import copy, deepcopy
 import sys
 import os
 # Construct the absolute path to the directory containing the module.
-module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
-# Append the module path to sys.path
-sys.path.append(module_path)
+# module_path = os.path.abspath("/home/qpitto/Tests_KAIN/ZORA/ReMRChem2C/orbital4c")
+# # Append the module path to sys.path
+# sys.path.append(module_path)
 
 # import KAIN
 import utils
@@ -283,11 +283,11 @@ class scfsolv:
         # self.plotTree(kappa.compVect[0].real)
         # for j in range(self.Ncomp):
         #     print("is kappa constant???", j, utils.is_constant(kappa.compVect[j]))
-        # kappa_m1 = one-V_z/(2*self.c**2)
+        # kappa_m1 = one-V_z/(2*self.c**2) 
         # print("kappa^-1 squared norm", kappa_m1.compSqNorm())
         # print("================kappa", kappa.dot(kappa), kappa.compSqNorm(), "================")
         dkappa = [kappa.derivative(0).crop(self.prec), kappa.derivative(1).crop(self.prec), kappa.derivative(2).crop(self.prec)]
-        print("---------derivative kappa =", dkappa.compVect[0].real)
+        print("---------derivative kappa =", dkappa[0].compVect[0].real, dkappa[1].compVect[0].real, dkappa[2].compVect[0].real)
         # for i in range(len(dkappa)):
         #     dkappa.crop(self.prec)
             # print("compo: ", i)
@@ -328,7 +328,7 @@ class scfsolv:
         # NabkNab = NabkNab.crop(self.prec)
         NabkNab = NabkNab + dkappa[2] * dphi[2]
         NabkNab = NabkNab.crop(self.prec)
-        print("compFop NabkNab done") #TODO: where kapap^-1 
+        print("compFop NabkNab done") #"where kappa^-1 here?", no kappa^-1 here because it's not the scf eqt here, it's the hamiltonian
 
         #--spin orbit term-- #TODO: test to see if there is an issue with memory SCALARDEBUG
         #x direction
@@ -489,7 +489,7 @@ class scfsolv:
             mu = np.sqrt(-2*self.E_n[orb])
             self.G_mu[orb] = vp.HelmholtzOperator(self.mra, mu, self.prec) 
             #Compute new power iteration for the Helmholtz operator
-            phi_np1 = self.powerIter(orb)        
+            phi_np1 = self.powerIter(orb)    
             #create an alternate history of orbitals which include the power iteration
             phistory.append([phi_np1])
         #Orthonormalise the alternate orbital history
