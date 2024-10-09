@@ -1,12 +1,11 @@
 from vampyr import vampyr3d as vp
 import numpy as np
 
-
-#Copied from https://github.com/MRChemSoft/ReMRChem/blob/master/orbital4c/complex_fcn.py
 class complex_fcn:
     """Complex function trees as pairs of real and imaginary trees"""
     mra = None
-    def __init__(self):
+    def __init__(self, mra_input):
+        self.mra = mra_input
         self.real = vp.FunctionTree(self.mra)
         self.imag = vp.FunctionTree(self.mra)
         self.setZero()
@@ -22,6 +21,7 @@ class complex_fcn:
     def squaredNorm(self):
         re = self.real.squaredNorm()
         im = self.imag.squaredNorm()
+        # print("Cplx Fct Squared norm = ", re , "+ i", im)
         return re + im
     
     def normalize(self):
@@ -56,37 +56,61 @@ class complex_fcn:
         return rval + 1j * ival
 
     def __add__(self, other):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.real + other.real
         output.imag = self.imag + other.imag
         return output
 
     def __sub__(self, other):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.real - other.real
         output.imag = self.imag - other.imag
         return output
 
     def real_mul(self, coeff):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.real * coeff
         output.imag = self.imag * coeff
         return output
 
     def imag_mul(self, coeff):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.imag * (-1.0 * coeff)
         output.imag = self.real * coeff
         return output
 
+    # def __rmul__(self, other):
+    #     output = complex_fcn(self.mra)
+    #     output.real = self.real * np.real(other) - self.imag * np.imag(other)
+    #     output.imag = self.real * np.imag(other) + self.imag * np.real(other)
+    #     return output
     def __rmul__(self, other):
-        output = complex_fcn()
-        output.real = self.real * np.real(other) - self.imag * np.imag(other)
-        output.imag = self.real * np.imag(other) + self.imag * np.real(other)
-        return output
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+            output = complex_fcn(self.mra)
+            # Separate the real and imaginary parts of the multiplier
+            real_part = np.real(other)
+            imag_part = np.imag(other)
+            # Apply the real and imaginary multiplications
+            output.real = self.real * real_part - self.imag * imag_part
+            output.imag = self.real * imag_part + self.imag * real_part
+            return output
+        elif isinstance(other, complex_fcn):
+            output = complex_fcn(self.mra)
+            # Apply the real and imaginary multiplications
+            output.real = self.real * other.real - self.imag * other.imag
+            output.imag = self.real * other.imag + self.imag * other.real
+            return output
+        else:
+            print("other =" ,type(other))
+            raise TypeError("Unsupported type for multiplication with complex_fcn")
+        
+    def __truediv__(self, other):
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+            return self * (1/other)
+
         
     def __mul__(self, other):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.real * np.real(other) - self.imag * np.imag(other)
         output.imag = self.real * np.imag(other) + self.imag * np.real(other)
         return output
@@ -107,14 +131,14 @@ class complex_fcn:
         grad_im = vp.gradient(D, self.imag)
         grad = []
         for i in range(3):
-            comp = complex_fcn()
+            comp = complex_fcn(self.mra)
             comp.copy_fcns(real=grad_re[i], imag=grad_im[i])
             grad.append(comp)
         return grad
 
     def derivative(self, dir = 0, der = 'ABGV'):
         if(der == 'ABGV'):
-            D = vp.ABGVDerivative(self.mra, 0.0, 0.0)
+            D = vp.ABGVDerivative(self.mra, 0.5, 0.5)
         elif(der == 'PH'):
             D = vp.PHDerivative(self.mra)
         elif(der == 'BS'):
@@ -123,13 +147,13 @@ class complex_fcn:
             exit("Derivative operator not found")
         re_der = D(self.real, dir)
         im_der = D(self.imag, dir)
-        der_func = complex_fcn()
+        der_func = complex_fcn(self.mra)
         der_func.real = re_der
         der_func.imag = im_der
         return der_func
 
     def complex_conj(self):
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = self.real 
         output.imag = -1.0 * self.imag
         return output
@@ -242,7 +266,7 @@ class complex_fcn:
         if(func_b.squaredNorm() > 0 and func_c.squaredNorm() > 0):
             vp.advanced.multiply(prec, ir, -1.0, func_b, func_c)
 
-        output = complex_fcn()
+        output = complex_fcn(self.mra)
         output.real = rr + ii
         output.imag = ri + ir
 
@@ -253,13 +277,13 @@ class complex_fcn:
 
     #Not too happy about this design. Potential is only a real FunctionTree...
 def apply_potential(factor, potential, func, prec):
-    output = complex_fcn()
+    output = complex_fcn(func.mra)
     vp.advanced.multiply(prec, output.real, factor, potential, func.real)
     vp.advanced.multiply(prec, output.imag, factor, potential, func.imag)
     return output
 
 def apply_helmholtz(func, mu, light_speed, prec):
-    out_func = complex_fcn()
+    out_func = complex_fcn(func.mra)
     H = vp.HelmholtzOperator(func.mra, mu, prec)
     if(func.real.squaredNorm() > 1e-12):
         vp.advanced.apply(prec, out_func.real, H, func.real)
@@ -268,7 +292,7 @@ def apply_helmholtz(func, mu, light_speed, prec):
     return out_func
 
 def apply_poisson(func, mra, P, prec, thresholdNorm = 0, factor = 1.0):
-    out_func = complex_fcn()
+    out_func = complex_fcn(mra)
     if(func.real.squaredNorm() > thresholdNorm):
         vp.advanced.apply(prec, out_func.real, P, func.real)
         out_func.real *= factor
@@ -293,8 +317,8 @@ def multiply(prec, lhs, rhs):
     output.crop(prec)
     return output
 
-def divergence(vector, prec, der = "BS"):
-    out = complex_fcn()
+def divergence(vector, mra, prec, der = "BS"):
+    out = complex_fcn(mra)
     der_vec = {}
     for i in range(3):
         der_vec[i] = vector[i].derivative(i, der)
@@ -302,8 +326,8 @@ def divergence(vector, prec, der = "BS"):
     out.cropRealImag(prec)
     return out
 
-def vector_dot_r(vector, prec):
-    out = complex_fcn()
+def vector_dot_r(vector, mra, prec):
+    out = complex_fcn(mra)
     components = {}
     projection_operator = vp.ScalingProjector(out.mra, prec)
     for i in range(3):
@@ -336,7 +360,7 @@ def vector_gradient(vector, der = "BS"):
 
 # Note: some thresholding of the contributions should be considered here.
 def add_vector(func_array, coeff_array, prec):
-    output = complex_fcn()
+    output = complex_fcn(func_array[0].mra)
     real_array = []
     imag_array = []
     for i in range(len(func_array)):
@@ -347,3 +371,4 @@ def add_vector(func_array, coeff_array, prec):
     vp.advanced.add(prec, output.real, real_array)
     vp.advanced.add(prec, output.imag, imag_array)
     return output
+

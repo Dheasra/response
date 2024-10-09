@@ -287,7 +287,7 @@ class scfsolv:
         # print("kappa^-1 squared norm", kappa_m1.compSqNorm())
         # print("================kappa", kappa.dot(kappa), kappa.compSqNorm(), "================")
         dkappa = [kappa.derivative(0).crop(self.prec), kappa.derivative(1).crop(self.prec), kappa.derivative(2).crop(self.prec)]
-        print("---------derivative kappa =", dkappa[0].compVect[0].real, dkappa[1].compVect[0].real, dkappa[2].compVect[0].real)
+        # print("---------derivative kappa =", dkappa[0].compVect[0].real, dkappa[1].compVect[0].real, dkappa[2].compVect[0].real)
         # for i in range(len(dkappa)):
         #     dkappa.crop(self.prec)
             # print("compo: ", i)
