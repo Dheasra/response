@@ -102,7 +102,7 @@ class scfsolv:
     # pos[in]: List of lists (Matrix-ish) of floating point number. The mother list contains lists (vectors) of the 3D coordinates of the each atom in the system, in atomic units.
     # Z[in]: List of integers. Each number is the atomic charge of an atom in the system. Be warned that each atoms must be ordered in the same way in pos and Z
     # source_init_guess[in]: Directory (string) of the inital guesses for the orbitals. Currently this code cannot create an initial guess, and thus needs an MRChem-compatible inital guess created from another program, such as MRChem.
-    def initMolec(self, No,  pos, Z, source_init_guess, restricted = True, sclr = True, copy_orbitals = False) -> None: 
+    def initMolec(self, No,  pos, Z, source_init_guess, guess_type = 1, sclr = True) -> None: 
         print("Initmolec")
         self.Nz = len(Z)
         self.R = pos
@@ -128,14 +128,16 @@ class scfsolv:
             # paired_idx = int(np.floor(i/2))
             paired_idx = i
             print("paired idx", paired_idx)
-            if copy_orbitals:
+            if guess_type == 0:  #Copy the wavefunctions from a preceding run of the code 
                 phi = source_init_guess.phi_prev[i][-1].reproject(self.P_eps)
-            elif restricted == True: #Paired orbitals
+            elif guess_type == 1:  #Slater-type orbitals initial guess for Hydrogen-like atoms
+                phi = utils.make_NR_starting_guess(self.R[0], self.Z[0], self.mra, self.prec)
+            elif guess_type == 2: #Load Paired orbitals files from MRCHem
                 # print("tut")
                 phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  
                 # phi.compVect[1].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  #test to see if the initial guess was an issue
                 # phi.normalize() #test to see if the initial guess was an issue
-            else:
+            else: #Load Restricted orbitals files from MRCHem
                 if i%2 == 0:
                     # print(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")
                     phi.compVect[0].real.loadTree(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")

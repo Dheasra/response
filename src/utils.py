@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from copy import deepcopy
 
+from scipy.special import eval_genlaguerre
+
 from spinor import spinor
 
 #Stuff to import complex_fcn from far away
@@ -128,3 +130,48 @@ def is_constant(cplx_fct, threshold = 1e-8, target_value = None):
         if np.abs(imagz[i]-avrgiz) > threshold:
             return False
     return True
+
+
+
+# Shamelessly stolen with permission from https://github.com/ilfreddy/ReMRChem/blob/NR-starting-guess/starting_guess.py
+def make_NR_starting_guess(position, charge, mra, prec):
+    nr_wf_tree = vp.FunctionTree(mra)
+    nr_wf_tree.setZero()
+    n = 1
+    l = 0
+    Peps = vp.ScalingProjector(mra, prec)
+    guess = lambda x : wf_hydrogenionic_atom(n,l,[x[0]-position[0], x[1]-position[1], x[2]-position[2]],charge)
+    nr_wf_tree = Peps(guess)
+    
+    La_comp = complex_fcn(mra)
+    La_comp.real = nr_wf_tree
+
+    spinorb1 = spinor(mra, N_components=2)
+    # spinorb2 = spinor(mra, N_components=2)
+    spinorb1.compVect[0] = La_comp
+    # spinorb1.init_small_components(prec/10)
+    spinorb1.normalize()
+    spinorb1.crop(prec)
+    return spinorb1
+
+#returns the value of the radial WF in the point r
+# 1. the nucleus is assumed infintely heavy (mass of electron and Bohr radius used)
+# 2. the nucleus is placed in the origin
+# 3. atomic units are assumed a0 = 1  hbar = 1  me = 1  4pie0 = 1
+def radial_wf_hydrogenionic_atom(n,l,r,Z):
+    rho = 2 * Z * r
+    slater = np.exp(-rho/2)
+    polynomial = eval_genlaguerre(n-l-1, 2*l+1, rho)
+    f1 = np.math.factorial(n-l-1)
+    f2 = np.math.factorial(n+l)
+    norm = np.sqrt((2*Z/n)**3 * f1 / (2 * n * f2))
+    value = norm * rho**l * polynomial * slater
+    return value
+
+def wf_hydrogenionic_atom(n,l,position,Z):
+    if(l != 0):
+        print("only s orbitals for now")
+        exit(-1)
+    distance = np.sqrt(position[0]**2 + position[1]**2 + position[2]**2)
+    value = radial_wf_hydrogenionic_atom(n, l, distance, Z)
+    return value

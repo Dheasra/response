@@ -195,6 +195,8 @@ class spinor:
             self.compVect[i].crop(prec) 
             output.compVect[i] = self.compVect[i]
         return output
+    
+
         
     # def invert(self)
     #     one = spinor(self.mra, self.length)
