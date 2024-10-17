@@ -749,7 +749,7 @@ class scfsolv:
                 if printVal:
                     print(f"Orbital: {orb}    Norm: {norm}    Update: {update}    Energy:{self.E_n}")
                     if self.Nspinor == 1:
-                        print("Scaled energy (4C Dirac energy)", (1/self.E_n.real - 1/(self.c**2))**(-1))
+                        print("Scaled energy (4C Dirac energy)", (1/self.E_n.real - 1/(2*self.c**2))**(-1))
 
         # if pltShow:
         #     plt.show()
