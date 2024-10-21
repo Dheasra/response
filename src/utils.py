@@ -134,7 +134,7 @@ def is_constant(cplx_fct, threshold = 1e-8, target_value = None):
 
 
 # Shamelessly stolen with permission from https://github.com/ilfreddy/ReMRChem/blob/NR-starting-guess/starting_guess.py
-def make_NR_starting_guess(position, charge, mra, prec):
+def make_NR_starting_guess_Hlike(position, charge, mra, prec, Ncompo = 2):
     nr_wf_tree = vp.FunctionTree(mra)
     nr_wf_tree.setZero()
     n = 1
@@ -146,7 +146,7 @@ def make_NR_starting_guess(position, charge, mra, prec):
     La_comp = complex_fcn(mra)
     La_comp.real = nr_wf_tree
 
-    spinorb1 = spinor(mra, N_components=2)
+    spinorb1 = spinor(mra, N_components=Ncompo)
     # spinorb2 = spinor(mra, N_components=2)
     spinorb1.compVect[0] = La_comp
     # spinorb1.init_small_components(prec/10)
@@ -175,3 +175,12 @@ def wf_hydrogenionic_atom(n,l,position,Z):
     distance = np.sqrt(position[0]**2 + position[1]**2 + position[2]**2)
     value = radial_wf_hydrogenionic_atom(n, l, distance, Z)
     return value
+
+def make_NR_starting_guess(positionList, chargeList, mra, prec, Ncompo=2):
+    initGuess = spinor(mra, Ncompo)
+    initGuess.setZero()
+    for r in range(len(positionList)):
+        initGuess = initGuess + make_NR_starting_guess_Hlike(positionList[r], chargeList[r], mra, prec)
+    initGuess.normalize()
+    initGuess.crop(prec)
+    return initGuess

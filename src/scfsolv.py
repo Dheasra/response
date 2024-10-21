@@ -27,7 +27,7 @@ class scfsolv:
     Pois : vp.PoissonOperator               #Poisson operator
     D : vp.ABGVDerivative                   #derivative operator
     G_mu : list                             #list of Helmholtz operator for every orbital
-    Nspinor : int                           #number of orbitals
+    Nspinor : int                           #number of orbitals/Kramer's pairs
     Fock : np.ndarray                       #Fock matrix
     Vnuc : spinor                           #nuclear potential
     J : spinor                              #Coulomb potential
@@ -107,12 +107,13 @@ class scfsolv:
         self.Nz = len(Z)
         self.R = pos
         self.Z = Z
-        self.Nspinor = No
-        self.Nel = 0
+        self.Nel = No
+        self.Nspinor = max(1, np.floor(No/2))
+        # self.Nel = 0
         self.scalar = sclr
-        # computing the number of electrons (Nel)
-        for i in range(self.Nz):
-            self.Nel += Z[i]
+        # # computing the number of electrons (Nel)
+        # for i in range(self.Nz):
+        #     self.Nel += Z[i]
         # Kinetic = spinor(self.mra, self.Ncomp)
         # Kinetic.setZero()
         for i in range(len(self.Vnuc)):
@@ -131,7 +132,7 @@ class scfsolv:
             if guess_type == 0:  #Copy the wavefunctions from a preceding run of the code 
                 phi = source_init_guess.phi_prev[i][-1].reproject(self.P_eps)
             elif guess_type == 1:  #Slater-type orbitals initial guess for Hydrogen-like atoms
-                phi = utils.make_NR_starting_guess(self.R[0], self.Z[0], self.mra, self.prec)
+                phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
             elif guess_type == 2: #Load Paired orbitals files from MRCHem
                 # print("tut")
                 phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  
@@ -254,19 +255,6 @@ class scfsolv:
         # print("start compFop")
         #Zora potential
         V_z = self.Vnuc + self.J
-        # print("WARNING: V_Z only contains  Vnuc")
-        # V_z = self.Vnuc 
-        # print("V_z", type(V_z), V_z.dot(V_z), len(V_z))
-        # for j in range(self.Ncomp):
-            # print("is Vz constant???", j, utils.is_constant(V_z.compVect[j]))
-        #     print("Vnuc check", self.Vnuc.compVect[i].dot(self.Vnuc.compVect[i]))
-        #constant fct f(x) = 1
-        # one = spinor(self.mra, self.Ncomp) #TODO: make a map to compute 1-Vz 
-        # one.setZero()
-        # for j in range(self.Ncomp):
-        #     one.compVect[j].real = self.P_eps(lambda r : utils.Fone(r))
-        #     # print("is one constant???", j, utils.is_constant(one.compVect[j]))
-        # print("compFop one done")
         #kappa operator
         kappa = spinor(self.mra, self.Ncomp)
         kappa.setZero()
@@ -417,7 +405,7 @@ class scfsolv:
             return utils.apply_Poisson_spinor(self.Pois, PNbr)
             # return output
         else: 
-            print("compute Coulomb onlz 1 e")
+            print("compute Coulomb only 1 e")
             J = spinor(self.mra, self.Ncomp)
             J.setZero()
             return J
