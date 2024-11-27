@@ -74,9 +74,9 @@ class scfsolv:
         self.J = spinor(self.mra, Ncomponents)
         self.J.setZero()
         # # Vnuc only has a real part, but I am not creating a real-valued spinor class
-        self.Vnuc = spinor(self.mra, Ncomponents)
-        self.Vnuc.setZero()
-        # self.Vnuc = self.P_eps(utils.Fzero)
+        # self.Vnuc = spinor(self.mra, Ncomponents)
+        # self.Vnuc.setZero()
+        self.Vnuc = self.P_eps(utils.Fzero)
         self.K = []
         self.R = []
         self.Z = []
@@ -108,7 +108,7 @@ class scfsolv:
         self.R = pos
         self.Z = Z
         self.Nel = No
-        self.Nspinor = max(1, np.floor(No/2))
+        self.Nspinor = int(max(1, np.floor(No/2)))
         # self.Nel = 0
         self.scalar = sclr
         # # computing the number of electrons (Nel)
@@ -116,9 +116,10 @@ class scfsolv:
         #     self.Nel += Z[i]
         # Kinetic = spinor(self.mra, self.Ncomp)
         # Kinetic.setZero()
-        for i in range(len(self.Vnuc)):
-            print("Vnuc init", i)
-            self.Vnuc.compVect[i].real = self.P_eps(lambda r : self.f_nuc(r, threshold=-1e5))
+        # for i in range(len(self.Vnuc)): #OldVnuc
+        #     # print("Vnuc init", i) #OldVnuc
+        #     self.Vnuc.compVect[i].real = self.P_eps(lambda r : self.f_nuc(r, threshold=-1e5)) #OldVnuc 
+        self.Vnuc = self.P_eps(lambda r : self.f_nuc(r, threshold=-1e5))
         # for j in range(self.Ncomp):
         #     print("is Vnuc constant???", j, utils.is_constant(self.Vnuc.compVect[j]))
         # #initial guesses provided by mrchem
@@ -128,47 +129,26 @@ class scfsolv:
             phi.setZero()
             # paired_idx = int(np.floor(i/2))
             paired_idx = i
-            print("paired idx", paired_idx)
+            # print("paired idx", paired_idx)
             if guess_type == 0:  #Copy the wavefunctions from a preceding run of the code 
                 phi = source_init_guess.phi_prev[i][-1].reproject(self.P_eps)
             elif guess_type == 1:  #Slater-type orbitals initial guess for Hydrogen-like atoms
                 phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
             elif guess_type == 2: #Load Paired orbitals files from MRCHem
-                # print("tut")
                 phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  
-                # phi.compVect[1].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  #test to see if the initial guess was an issue
-                # phi.normalize() #test to see if the initial guess was an issue
             else: #Load Restricted orbitals files from MRCHem
                 if i%2 == 0:
                     # print(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")
                     phi.compVect[0].real.loadTree(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")
                 else: 
                     phi.compVect[0].real.loadTree(f"{source_init_guess}phi_b_scf_idx_{paired_idx}_re")
-            # print("init guess norm", vp.dot(phi.compVect[0].real, phi.compVect[0].real))
             self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Nspinor)] #list of the corrections at previous steps
 
-        self.printOperators()
-        # print("Test Pauli matrix multiplication")
-        # #TODO
-        # for i in range(self.Nspinor):
-        #     # print("init guess", i)
-        #     phi = spinor(self.mra, self.Ncomp)
-        #     phi.setZero()
-        #     phi.compVect[0].real.loadTree(f"{init_g_dir}phi_p_scf_idx_{i}_re") 
-        #     for direction in range(3):
-        #         phi_dir = utils.apply_Pauli(direction, phi)
-        #         print("Test direction: ", direction)
-        #         print("Overlap Phi / simga*Phi" ,phi.dot(phi_dir))
-        #         print("Norm Phi:", phi.compNorm(), "Norm sigma*Phi", phi_dir.compNorm())
+        print("S initial guess = ", self.computeOverlap())
 
-        # print("Overlap init")
-        # print("S=",self.computeOverlap())
-        # TestImag = 1j*self.phi_prev[0][-1]
-        # print("InitMolec test imag: ", complex_fcn.dot(self.phi_prev[0][-1],TestImag))
+        # self.printOperators()
         #Compute the Fock matrix and potential operators 
-        # print("Fock start")
-        print("pouet")
         self.compFock()
         # print("Fock = ", self.Fock)
         #Energies of each orbital
@@ -179,6 +159,8 @@ class scfsolv:
         self.G_mu = []
         # print("Overlap init post-fock")
         # print("S=",self.computeOverlap())
+        self.printOperators()
+        # print("initial step now")
         for i in range(self.Nspinor):
             # print("Helmholtz operator init ", i)
             self.E_n.append(self.Fock[i,i])
@@ -192,26 +174,36 @@ class scfsolv:
             # Apply Helmholtz operator to obtain phi_np1 #5
             phi_np1 = self.powerIter(orb)
             # print("post powerIter", orb)
+            # print("S post power iter=",self.computeOverlap()) #Inutile, ne mesure pas phi_np1
+
             # Compute update = ||phi^{n+1} - phi^{n}|| #6
             # print("Post power Iter, pre normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.f_prev[orb].append(phi_np1 - self.phi_prev[orb][-1])
+            tuttest = phi_np1.compNorm() #debug
+            # print(" ===== phi_np1 norm (ok?)= ", tuttest) #debug
             phi_np1.normalize()
+            # for i in range(self.Ncomp):
+            #     phi_np1.compVect[i] = phi_np1.compVect[i]/np.sqrt(tuttest)
+            # print(" ===== phi_np1 norm 2 (pas ok)= ", phi_np1.compNorm())
             # print("Post power Iter, post normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.phi_prev[orb].append(phi_np1)
+            # print("S post append =",self.computeOverlap())
 
             if len(self.phi_prev[orb]) > self.khist: #deleting the first element if we don't want to use KAIN
                 del self.phi_prev[orb][0]
                 # del self.f_prev[orb][0]
-        # print("Overlap init post-powerIter")
+        # print("Overlap init post-1st iteration")
         # print("S=",self.computeOverlap())
         #Orthonormalise orbitals since they are molecular orbitals
+        # print("tut initmolec")
         phi_ortho = self.orthonormalise()
+        # print("tut2 initmolec")
         # phi_ortho = self.orthonormaliseKramer()
         for orb in range(self.Nspinor): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
         # print("Overlap init end")
-            print(orb, " length update history: ", len(self.f_prev[orb]))
-        print("Init molec S=",self.computeOverlap())
+        #     print(orb, " length update history: ", len(self.f_prev[orb]))
+        # print("Init molec S=",self.computeOverlap())
 
         
 
@@ -233,20 +225,7 @@ class scfsolv:
             for i in range(self.Nspinor):
                 # self.Fock[i,j] = complex_fcn.dot(self.phi_prev[i][-1], Fphi) #TODO 2C
                 # print("compFock val", self.phi_prev[i][-1].dot(self.Vnuc * self.phi_prev[j][-1]))
-                self.Fock[i,j] = self.phi_prev[i][-1].dot(Fphi) 
-        # #===Test new, forced-Hermitian Fock matrix 
-        # for j in range(self.Nspinor):
-        #     # print("compFock main loop", j)
-        #     #Compute the potential operator
-        #     self.K.append(self.computeExchangePotential(j))            
-        #     Fphi = self.compFop(j)
-        #     # compute the energy from the orbitals 
-        #     for i in range(j, self.Nspinor):
-        #         # self.Fock[i,j] = complex_fcn.dot(self.phi_prev[i][-1], Fphi) #TODO 2C
-        #         # print("compFock val", self.phi_prev[i][-1].dot(self.Vnuc * self.phi_prev[j][-1]))
-        #         self.Fock[i,j] = self.phi_prev[i][-1].dot(Fphi) 
-        #         if i != j:
-        #             self.Fock[j,i] = np.conjugate(self.Fock[i,j])
+                self.Fock[i,j] = self.phi_prev[i][-1].dotFull(Fphi) 
 
     # This method computes the Fock operator applied to an orbital "orb"; returns F_\phi = \hat{F}\ket{\phi} 
     # orb[in]: integer index of the chosen orbital
@@ -255,20 +234,22 @@ class scfsolv:
         # print("start compFop")
         #Zora potential
         V_z = self.Vnuc + self.J
+        # V_z = self.Vnuc
         #kappa operator
         kappa = spinor(self.mra, self.Ncomp)
         kappa.setZero()
         Gmap = vp.FunctionMap(fmap = self.computeKappaMinus1, prec=self.prec)
         # print("kappa before")
         for j in range(self.Ncomp): #TODO: use function mapping
-            print("kappa compo", j)
+            # print("kappa compo", j)
             # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinus1(r,j))
             # V_z = self.Vnuc + self.J
             # vp.advanced.map(lambda r : prec=self.prec, out=kappa, inp=V_z, fmap = self.computeKappaMinus1(r, j))
-            kappa.compVect[j].real = Gmap(V_z.compVect[j].real) 
+            # kappa.compVect[j].real = Gmap(V_z.compVect[j].real) #OldVnuc
+            kappa.compVect[j].real = Gmap(V_z)
             # kappa.compVect[j].real = self.P_eps(lambda r: np.real(V_z(j,r))*((4*self.c**2 - 2*np.real(V_z(j,r)))**(-1))) #representing kappa -1/2, w/ kappa = 0.5 *(1-V/2c^2)^-1
             # kappa.compVect[j].real = self.P_eps(lambda r: 0.5*(1-np.real(V_z(j, r))/(2*self.c**2))**(-1)) #TODO: Erreur ici parce que je fais ^-1 à un objet qui n'a pas de valeur imaginaire (=0) donc ça fait 1/0 et ça retourne NaN 
-        print("kappa after")
+        # print("kappa after")
         kappa.crop(self.prec)
         # self.plotTree(kappa.compVect[0].real)
         # for j in range(self.Ncomp):
@@ -277,20 +258,9 @@ class scfsolv:
         # print("kappa^-1 squared norm", kappa_m1.compSqNorm())
         # print("================kappa", kappa.dot(kappa), kappa.compSqNorm(), "================")
         dkappa = [kappa.derivative(0).crop(self.prec), kappa.derivative(1).crop(self.prec), kappa.derivative(2).crop(self.prec)]
-        # print("---------derivative kappa =", dkappa[0].compVect[0].real, dkappa[1].compVect[0].real, dkappa[2].compVect[0].real)
-        # for i in range(len(dkappa)):
-        #     dkappa.crop(self.prec)
-            # print("compo: ", i)
-            # print("dkappa", dkappa[i].dot(dkappa[i]))
-        print("================kappadone==================")
+        # print("================kappadone==================")
         dphi = [self.phi_prev[orb][-1].derivative(0).crop(self.prec), self.phi_prev[orb][-1].derivative(1).crop(self.prec), self.phi_prev[orb][-1].derivative(2).crop(self.prec)] 
-        print("compFop kappa done")
-        # for i in range(len(dphi)):
-        #     print("compo: ", i)
-        #     for j in range(len(dphi[i])):
-        #         print("dphi", type(dphi[i].compVect[j]))
-            # print("dphi", dphi[i].dot(dphi[i]))
-            # print("dkappa", dkappa[i].dot(dkappa[i]))
+        # print("compFop kappa done")
         #Kinetic operator computation 
         #first scalar term: (kappa-1/2)*nabla^2
         kNab2 = spinor(self.mra, self.Ncomp)
@@ -307,7 +277,6 @@ class scfsolv:
         halfNab2 = halfNab2 + 0.5*dphi[2].derivative(2)
         halfNab2 =  halfNab2.crop(self.prec)
 
-
         # print("compFop kNab2 done")
         #second scalar term: -0.5 *nabla(kappa) * nabla 
         NabkNab = spinor(self.mra, self.Ncomp)
@@ -318,7 +287,7 @@ class scfsolv:
         # NabkNab = NabkNab.crop(self.prec)
         NabkNab = NabkNab + dkappa[2] * dphi[2]
         NabkNab = NabkNab.crop(self.prec)
-        print("compFop NabkNab done") #"where kappa^-1 here?", no kappa^-1 here because it's not the scf eqt here, it's the hamiltonian
+        # print("compFop NabkNab done") #"where kappa^-1 here?", no kappa^-1 here because it's not the scf eqt here, it's the hamiltonian
 
         #--spin orbit term-- #TODO: test to see if there is an issue with memory SCALARDEBUG
         #x direction
@@ -338,7 +307,7 @@ class scfsolv:
         # print("sporb 3 ", sporb.dot(sporb), pouet.dot(pouet))
         # print("sporb step 3 ok")
         sporb = sporb.crop(self.prec)
-        print("compFop sporb done")
+        # print("compFop sporb done")
 
         #Total kinetic operator
         Tphi = spinor(self.mra, self.Ncomp)
@@ -346,17 +315,34 @@ class scfsolv:
         # Tphi = (-1)*(kNab2 + NabkNab) 
         if self.scalar == False:
             Tphi = Tphi - sporb #TODO: test to see if there is an issue with memory SCALARDEBUG
-        self.Kinetic_op.append(Tphi)
+        
+        #used for printing/debugging
+        if len(self.Kinetic_op) <= orb:
+            self.Kinetic_op.append(Tphi)
+        else:
+            self.Kinetic_op[orb] = Tphi
         # print("types CompFop", type(self.Vnuc), type(self.J), type(self.phi_prev[orb][-1]), self.K[orb])
         Fphi = spinor(self.mra, self.Ncomp)
-        Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] - self.K[orb]
+        Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] - self.K[orb] #default version, this should work but doesn't
+        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + self.J*self.phi_prev[orb][-1] #Debug 2e- version
+        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + 0.5*2*self.J*self.phi_prev[orb][-1] - 0.5*self.K[orb] #This doesn't work (error in 1e-2)
+        # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] + 2*self.J*self.phi_prev[orb][-1] - self.K[orb]
+        # Fphi = 2*Tphi + 2*self.Vnuc*self.phi_prev[orb][-1] + 2*self.J*self.phi_prev[orb][-1] - self.K[orb] #This is garbage. The factor 2 is only valid in RHF but we're not in RHF
         # print("WARNING: J and K are not included in Fock")
+
+        #Debug
+        kappa_minus_half_NabSq = kNab2 - halfNab2
+        print("Expectation value (k-1/2)*nabla^2 : ", self.phi_prev[0][-1].dotFull(kappa_minus_half_NabSq))
+
+        print("Expectation value gradk*Nab : ", self.phi_prev[0][-1].dotFull(NabkNab))
+        print("Expectation value sporb : ", self.phi_prev[0][-1].dotFull(sporb))
+
         # Fphi = Tphi + self.Vnuc*self.phi_prev[orb][-1] 
         # print("Test compFop", Tphi.dot(Tphi), (self.Vnuc * self.phi_prev[orb][-1]).dot(self.Vnuc * self.phi_prev[orb][-1]), (self.J * self.phi_prev[orb][-1]).dot(self.J * self.phi_prev[orb][-1]), self.K[orb].dot(self.K[orb]))
         # print("Test compFop", Tphi.dot(Tphi), self.phi_prev[orb][-1].dot(self.Vnuc * self.phi_prev[orb][-1]), self.phi_prev[orb][-1].dot(self.J * self.phi_prev[orb][-1]), self.phi_prev[orb][-1].dot(self.K[orb]))
         # print("CompFop", orb, complex_fcn.dot(self.J * self.phi_prev[orb][-1], self.J * self.phi_prev[orb][-1]))
         # Fphi_test = Tphi
-        print("CompFop real", orb, Fphi.dot(Fphi))
+        # print("CompFop real", orb, Fphi.dot(Fphi))
         return Fphi
 
     #Computes the product between an electron in orbital orb1 and another in orbital orb2
@@ -370,7 +356,7 @@ class scfsolv:
         # rho = self.phi_prev[orb1][-1]*self.phi_prev[orb2][-1]
         # return rho
         if orb1 >= self.Nspinor and orb2 < self.Nspinor:
-            rho = self.phi_prev[orb2][-1].multKramer(self.phi_prev[orb1-self.Nspinor][-1])
+            rho = self.phi_prev[orb2][-1].dotKramer(self.phi_prev[orb1-self.Nspinor][-1])
             rho = rho.conjugate()
             # # this will plot the wavefunction at each iteration
             # r_x = np.linspace(-5., 5., 1000
@@ -378,26 +364,27 @@ class scfsolv:
             # plt.plot(r_x, comp_alpha) 
             # comp_beta = [rho(1, [x, 0.0, 0.0]) for x in r_x]
             # plt.plot(r_x, comp_beta) 
-            print("orb1 Is rho zero? (should be)", utils.is_constant(rho.compVect[0], self.prec, 0.0), utils.is_constant(rho.compVect[1], self.prec, 0.0))
+            # print("Comp product orb1 Is rho zero? (should be)", utils.is_constant(rho.compVect[0], self.prec, 0.0), utils.is_constant(rho.compVect[1], self.prec, 0.0))
         elif orb2 >= self.Nspinor and orb1 < self.Nspinor:
-            rho = self.phi_prev[orb1][-1].multKramer(self.phi_prev[orb2-self.Nspinor][-1])
-            print("orb2 Is rho zero? (should be)", utils.is_constant(rho.compVect[0], self.prec, 0.0), utils.is_constant(rho.compVect[1], self.prec, 0.0))
+            rho = self.phi_prev[orb1][-1].dotKramer(self.phi_prev[orb2-self.Nspinor][-1])
+            # print("Comp product orb2 Is rho zero? (should be)", utils.is_constant(rho.compVect[0], self.prec, 0.0), utils.is_constant(rho.compVect[1], self.prec, 0.0))
         else:
-            rho = self.phi_prev[orb1%self.Nspinor][-1].conjugate()*self.phi_prev[orb2%self.Nspinor][-1]
+            rho = self.phi_prev[orb1%self.Nspinor][-1].dot(self.phi_prev[orb2%self.Nspinor][-1])
+        # rho = self.phi_prev[orb1%self.Nspinor][-1].conjugate()*self.phi_prev[orb2%self.Nspinor][-1] #TestNoMultKramer
         return rho
+    
+
 
     #This method computes the Coulomb operator  of the molecule
     # [out]: function tree (vp.FunctionTree) representation of the operator
-    def computeCoulombOperator(self): 
+    def computeCoulombOperator_old(self): 
         # sum_e = 0
         # for i in range(len(self.Z)):
         #     sum_e += self.Z[i]
         if self.Nel > 1:
-            # print("compute Coulomb more that 1 e")
-            # print("comp J")
-            # output = spinor(self.mra, self.Ncomp)
             PNbr = 4*np.pi*self.compProduct(0, 0) #Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
-            for orb in range(1, 2*self.Nspinor):
+            for orb in range(1, 2*self.Nspinor): #Maybe Nel? 
+            # for orb in range(1, self.Nspinor):#TestNoMultKramer
                 PNbr = PNbr + 4*np.pi*self.compProduct(orb, orb)
             # return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
             # output.real = self.Pois(2*PNbr.real)
@@ -409,12 +396,31 @@ class scfsolv:
             J = spinor(self.mra, self.Ncomp)
             J.setZero()
             return J
+        
+    def computeCoulombOperator(self): 
+        # sum_e = 0
+        # for i in range(len(self.Z)):
+        #     sum_e += self.Z[i]
+        if self.Nel > 1:
+            PNbr = 4*np.pi*(self.phi_prev[0][-1].dot(self.phi_prev[0][-1]) + self.phi_prev[0][-1].dot(self.phi_prev[0][-1]))#Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
+            # return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
+            # output.real = self.Pois(2*PNbr.real)
+            # output.imag = self.Pois(2*PNbr.imag)
+            # return utils.apply_Poisson_spinor(self.Pois, PNbr) #TODO: change to multiplication of fct and spinor
+            return self.Pois(PNbr.real)
+            # return output
+        else: 
+            print("compute Coulomb only 1 e")
+            Jtmp = spinor(self.mra, self.Ncomp)
+            Jtmp.setZero()
+            return Jtmp.compVect[0].real
+        
     
 
     #This method computes the exchange operator applied to an orbital of index "idx"
     # idx[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     # [out]: function tree (vp.FunctionTree) representation of the operator
-    def computeExchangePotential(self, idx):
+    def computeExchangePotential_old(self, idx):
         # sum_e = 0
         # for i in range(len(self.Z)):
         #     sum_e += self.Z[i]
@@ -436,12 +442,31 @@ class scfsolv:
             Korb = spinor(self.mra, self.Ncomp)
             Korb.setZero()
             for j in range(2*self.Nspinor): #TODO: ça risque de faire des double-comptages ça 
+            # for j in range(self.Nspinor):    #TestNoMultKramer
                 Korb = Korb + self.phi_prev[j%self.Nspinor][-1] * utils.apply_Poisson_spinor(self.Pois, 4*np.pi*self.compProduct(j, idx))
             return Korb
             # Korb = self.phi_prev[0][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[0][-1].density(self.prec), self.mra, self.Pois, self.prec)
             # for j in range(1, self.Nspinor):
             #     Korb += self.phi_prev[j][-1] * complex_fcn.apply_poisson(4 * np.pi * self.phi_prev[j][-1].density(self.prec), self.mra, self.Pois, self.prec)
             # return Korb
+        else: 
+            print("compute Korb only 1 e")
+            Korb = spinor(self.mra, self.Ncomp)
+            Korb.setZero()
+            return Korb
+        
+        #This method computes the exchange operator applied to an orbital of index "idx"
+    # idx[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
+    # [out]: function tree (vp.FunctionTree) representation of the operator
+    def computeExchangePotential(self, idx):
+            # print("compute Korb only 1 e")
+        if self.Nel > 1:
+            Korb = spinor(self.mra, self.Ncomp)
+            Korb.setZero()
+            Korb = self.phi_prev[0][-1] * self.Pois(4*np.pi*self.compProduct(0, idx).real)
+            Korb = Korb + self.phi_prev[0][-1].kramerConjugate() * self.Pois(4*np.pi*self.compProduct(1, idx).real) #TODO: appliquer Kramer à self.phi_prev[1][-1] plutôt que lui laisser l'indice 1
+            # PNbr = 4*np.pi*(self.phi_prev[0][-1].dot(self.phi_prev[0][-1]) + self.phi_prev[0][-1].multKramer(self.phi_prev[0][-1]))
+            return Korb
         else: 
             print("compute Korb only 1 e")
             Korb = spinor(self.mra, self.Ncomp)
@@ -465,14 +490,14 @@ class scfsolv:
         #Compute the fock matrix of the system
         self.compFock()
 
-        print("ExpandSol start S=", self.computeOverlap())
+        # print("ExpandSol start S=", self.computeOverlap())
         
         phistory = []
         self.E_n = []
         norm = []
         update = []
-        shell_energy, U = np.linalg.eig(self.Fock)
-        print("Shell energy", shell_energy)
+        # shell_energy, U = np.linalg.eig(self.Fock)
+        # print("Shell energy", shell_energy)
         for orb in range(self.Nspinor):
             self.E_n.append(self.Fock[orb, orb])
             #Redefine the Helmholtz operator with the updated energy
@@ -491,7 +516,7 @@ class scfsolv:
         phi_test = []
         for o in range(self.Nspinor):
             phi_test.append([phistory[o]])
-        print("ExpandSol S=", self.computeOverlap(phi_test))
+        # print("ExpandSol S=", self.computeOverlap(phi_test))
         
         for orb in range(self.Nspinor):
             self.f_prev[orb].append(phistory[orb] - self.phi_prev[orb][-1])
@@ -518,9 +543,9 @@ class scfsolv:
             if len(self.phi_prev[orb]) > self.khist: #deleting oldest element to save memory
                 del self.phi_prev[orb][0]
                 del self.f_prev[orb][0]
-        print("ExpandSol final S=", self.computeOverlap())
+        # print("ExpandSol final S=", self.computeOverlap())
         self.printOperators()
-        print("end ExpandSol")
+        # print("end ExpandSol")
         return np.array(self.E_n), np.array(norm), np.array(update)
     
     def expandSolution_nokain(self):
@@ -601,8 +626,9 @@ class scfsolv:
         for j in range(self.Ncomp):
             # print("kappa compo", j)
             # kappa_alt.compVect[j].real = self.P_eps(lambda r: 0.5*(1-np.real(V_z(j, r))/(2*self.c**2))**(-1)) #TODO: checker les 1/2
-            kappa.compVect[j].real = Gmap(V_z.compVect[j].real) 
-            kappa_m1.compVect[j].real = self.P_eps(lambda r: 1-np.real(V_z(j, r))/(2*self.c**2)) 
+            # kappa.compVect[j].real = Gmap(V_z.compVect[j].real) #OldVnuc
+            kappa.compVect[j].real = Gmap(V_z)
+            kappa_m1.compVect[j].real = self.P_eps(lambda r: 1-V_z(r)/(2*self.c**2)) 
             # kappa.compVect[j].real = kappa_minus_1
             # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinus1(r,j))
             # kappa_m1.compVect[j].real = self.P_eps(lambda r: np.real(4*self.c**2/np.real(V_z(j,r)) - 2))
@@ -676,6 +702,7 @@ class scfsolv:
             if(phi_np1_tmp.compVect[l].imag.squaredNorm() > 1e-12):
                 phi_np1.compVect[l].imag = -2 * self.G_mu[orb](phi_np1_tmp.compVect[l].imag)
         phi_np1.crop(self.prec)
+        print("Power Iter, norm of new guess = ", phi_np1.dotFull(phi_np1), phi_np1.compVect[0].dot(phi_np1.compVect[0]), phi_np1.compVect[1].dot(phi_np1.compVect[1]))
         return phi_np1
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
@@ -693,9 +720,9 @@ class scfsolv:
         b = np.zeros(lenHistory-1, dtype=complex)
         for l in range(lenHistory-1):  
             dPhi = self.phi_prev[orb][l] - self.phi_prev[orb][-1]
-            b[l] = dPhi.dot( self.f_prev[orb][-1])
+            b[l] = dPhi.dotFull( self.f_prev[orb][-1])
             for j in range(lenHistory-1):
-                A[l,j] = -dPhi.dot( self.f_prev[orb][j] - self.f_prev[orb][-1])
+                A[l,j] = -dPhi.dotFull( self.f_prev[orb][j] - self.f_prev[orb][-1])
         #solve Ac = b for c
         c = np.linalg.solve(A, b)
         return c
@@ -814,7 +841,7 @@ class scfsolv:
         S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
         for i in range(length):
             for j in range(i, length):
-                S[i,j] = phi_orth[i][-1].dot(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
+                S[i,j] = phi_orth[i][-1].dotFull(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
                 # S[i,j] = phi_orth[j][-1].dot(phi_orth[i][-1]) #compute the overlap of the current ([-1]) step
                 if i != j:
                     S[j,i] = np.conjugate(S[i,j])
@@ -855,6 +882,7 @@ class scfsolv:
         else: 
             length = len(phi_in)
         S = self.computeOverlap(phi_in)
+        print("S durant Ortho", S)
         #Diagonalise S to compute S' := S^-1/2 
         eigvals, U = np.linalg.eigh(S) #U is the basis change matrix
         # print("orthonorm eigvals=", eigvals)
@@ -882,7 +910,7 @@ class scfsolv:
         print("Post-Ortho S=", self.computeOverlap(phi_test))#test
         return phi_ortho
     
-    def orthonormaliseKramer(self, phi_in = None, normalise = True):
+    def orthonormaliseKramer(self, phi_in = None, normalise = True):# DEPRECATED -- TODO! Problème!!!!! la boucle for devrait pas Être sur les compononents parce qu'un spineur représente 1 électron
         # === Orthonormalise orbitals according to Karmer's paiers
         if phi_in == None:
             phi_in = self.phi_prev
@@ -923,31 +951,33 @@ class scfsolv:
         return phi_ortho
     
         #Prints the operators' matrices in the basis of the unperturbed orbitals in the terminal. 
+    
     #The best debugger in existance. 
     def printOperators(self):
+        self.Kinetic_op = []
         self.compFock()
         kinetic = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
         Vnuc = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
         coulomb = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
         exchange = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
-        kramer = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
+        # kramer = np.zeros((self.Nspinor,self.Nspinor), dtype=complex)
         for orb1 in range(self.Nspinor):
 
             Jphi0 = self.J*self.phi_prev[orb1][-1]
             Vnucphi0 = self.Vnuc*self.phi_prev[orb1][-1]
             for orb2 in range(self.Nspinor):
-                kinetic[orb1,orb2] = self.phi_prev[orb2][-1].dot(self.Kinetic_op[orb1])
-                Vnuc[orb1,orb2] = self.phi_prev[orb2][-1].dot(Vnucphi0) 
-                coulomb[orb1,orb2] = self.phi_prev[orb2][-1].dot(Jphi0) 
-                exchange[orb1,orb2] = self.phi_prev[orb2][-1].dot(self.K[orb1])
-                kramer[orb1, orb2] = self.phi_prev[orb2][-1].dotKramer(self.phi_prev[orb1][-1])
+                kinetic[orb1,orb2] = self.phi_prev[orb2][-1].dotFull(self.Kinetic_op[orb1])
+                Vnuc[orb1,orb2] = self.phi_prev[orb2][-1].dotFull(Vnucphi0) 
+                coulomb[orb1,orb2] = self.phi_prev[orb2][-1].dotFull(Jphi0) 
+                exchange[orb1,orb2] = self.phi_prev[orb2][-1].dotFull(self.K[orb1])
+                # kramer[orb1, orb2] = self.phi_prev[orb2][-1].dotKramer(self.phi_prev[orb1][-1])
                 # print("correlation", self.phi_prev[orb2][-1].dot(self.phi_prev[orb1][-1]), self.phi_prev[orb1][-1].dot(self.phi_prev[orb2][-1]))
         print("Fock", self.Fock)
         print("Kinetic", kinetic)
         print("Vnuc", Vnuc)
         print("Coulomb", coulomb)
         print("Exchange", exchange)
-        print("Kramer pair overlap", kramer)
+        # print("Kramer pair overlap", kramer)
 
 
     def plotTree(self, Ftree, dir = 0):

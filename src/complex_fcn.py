@@ -86,7 +86,40 @@ class complex_fcn:
     #     return output
     def __rmul__(self, other):
         if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
-            output = complex_fcn(self.mra)
+            # output = complex_fcn(self.mra)
+            # # Separate the real and imaginary parts of the multiplier
+            # real_part = np.real(other)
+            # imag_part = np.imag(other)
+            # # Apply the real and imaginary multiplications
+            # output.real = self.real * real_part - self.imag * imag_part
+            # output.imag = self.real * imag_part + self.imag * real_part
+            # return output
+            return self.__mul__(other)
+        elif isinstance(other, complex_fcn):
+            # output = complex_fcn(self.mra)
+            # # Apply the real and imaginary multiplications
+            # output.real = self.real * other.real - self.imag * other.imag
+            # output.imag = self.real * other.imag + self.imag * other.real
+            # return output
+            return self.__mul__(other) #This should call the __mul__ routine
+        elif isinstance(other, vp.FunctionTree):
+            # output.real = other * self.real 
+            # output.imag = other * self.imag 
+            # print("Spinor rmul ftree")
+            return self.__mul__(other)
+        else:
+            print("other =" ,type(other))
+            raise TypeError("Unsupported type", type(other), "for multiplication with complex_fcn")
+        
+    def __truediv__(self, other):
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+            return self * (1/other)
+
+        
+    def __mul__(self, other): #TODO: ajouter la multiplication par un fctTree réel
+        output = complex_fcn(self.mra)
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+            # output = complex_fcn(self.mra)
             # Separate the real and imaginary parts of the multiplier
             real_part = np.real(other)
             imag_part = np.imag(other)
@@ -95,24 +128,11 @@ class complex_fcn:
             output.imag = self.real * imag_part + self.imag * real_part
             return output
         elif isinstance(other, complex_fcn):
-            output = complex_fcn(self.mra)
-            # Apply the real and imaginary multiplications
-            output.real = self.real * other.real - self.imag * other.imag
-            output.imag = self.real * other.imag + self.imag * other.real
-            return output
-        else:
-            print("other =" ,type(other))
-            raise TypeError("Unsupported type for multiplication with complex_fcn")
-        
-    def __truediv__(self, other):
-        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
-            return self * (1/other)
-
-        
-    def __mul__(self, other):
-        output = complex_fcn(self.mra)
-        output.real = self.real * np.real(other) - self.imag * np.imag(other)
-        output.imag = self.real * np.imag(other) + self.imag * np.real(other)
+            output.real = self.real * np.real(other) - self.imag * np.imag(other)
+            output.imag = self.real * np.imag(other) + self.imag * np.real(other)
+        elif isinstance(other, vp.FunctionTree):
+            output.real = self.real * other 
+            output.imag = self.imag * other 
         return output
         
     def __str__(self):
@@ -152,7 +172,7 @@ class complex_fcn:
         der_func.imag = im_der
         return der_func
 
-    def complex_conj(self):
+    def conjugate(self):
         output = complex_fcn(self.mra)
         output.real = self.real 
         output.imag = -1.0 * self.imag

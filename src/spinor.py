@@ -61,6 +61,9 @@ class spinor:
             for i in range(self.length):
                 output.compVect[i] = other.compVect[i]*self.compVect[i]
             # print("mult norm", output.dot(output))
+        elif type(other) == cf or type(other) == vp.FunctionTree:
+            for i in range(self.length):
+                output.compVect[i] = other*self.compVect[i]
         return output 
     
     def __truediv__(self, other):
@@ -107,6 +110,9 @@ class spinor:
         norm = 0.0
         for i in range(self.length):
             norm += self.compVect[i].squaredNorm()
+            # if np.abs(norm) < 1e-10:
+        #         print("spinor compSqNorm, nique", i, self.compVect[i].squaredNorm())
+        # print("spinor compSqNorm", i, norm)
         return norm 
     
     def compNorm(self):
@@ -116,11 +122,19 @@ class spinor:
     def normalize(self):
         # output = spinor(self.mra, self.length)
         norm = self.compNorm()
+        # print("spinor normalise norm")
         for i in range(self.length):
-            if norm > 1e-12:
+            if norm > 1e-10:
                 self.compVect[i] = self.compVect[i]/norm
 
-    def dot(self, other):
+    def dot(self, other):#needs to be changed to only 
+        output = cf(self.mra)
+        for i in range(self.length):
+            # print("spinor dot")
+            output += self.compVect[i].conjugate() * other.compVect[i]
+        return output
+    
+    def dotFull(self, other):#Even though it is strictly the same as it used to be, now S is 0
         output = 0.
         for i in range(self.length):
             # print("spinor dot")
@@ -129,13 +143,16 @@ class spinor:
     
     def dotKramer(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
         if self.length > 1:
-            output = 0.
+            outtmp = spinor(self.mra, self.length)
+            output = outtmp.compVect[0]
             for i in range(0, self.length, 2):
                 # print("spinor dot")
                 # output += -1*cf.dot(self.compVect[2*i], other.conjugateComponent(2*i+1))
                 # output += cf.dot(self.compVect[2*i+1], other.conjugateComponent(2*i))
-                output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1]) #TODO: maybe broken, see multKramer for possibly the non-broken version
-                output += cf.dot(self.conjugateComponent(2*i+1), other.compVect[2*i])
+                # output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1]) #TODO: maybe broken, see multKramer for possibly the non-broken version
+                # output += cf.dot(self.conjugateComponent(2*i+1), other.compVect[2*i])
+                output = -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
+                output = output + self.compVect[2*i+1] * other.conjugateComponent(2*i)
             return output
         else:
             return self.dot(other)
@@ -154,6 +171,20 @@ class spinor:
             return output
         else:
             return self * other
+    
+    def kramerConjugate(self): #TODO
+        output = spinor(self.mra, self.length)
+        if self.length > 1:
+            output = spinor(self.mra, self.length)
+            for i in range(0, self.length, 2):
+                # print("spinor dot")
+                # output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
+                # output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.compVect[2*i]
+                output.compVect[2*i] += -1 * self.conjugateComponent(2*i+1)
+                output.compVect[2*i+1] += self.conjugateComponent(2*i) 
+            return output
+        else:
+            return self 
         
     def conjugate(self):
         conj = self
