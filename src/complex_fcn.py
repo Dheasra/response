@@ -85,7 +85,7 @@ class complex_fcn:
     #     output.imag = self.real * np.imag(other) + self.imag * np.real(other)
     #     return output
     def __rmul__(self, other):
-        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int) or isinstance(other, np.float64) or isinstance(other, np.float128) or isinstance(other, np.complex128):
             # output = complex_fcn(self.mra)
             # # Separate the real and imaginary parts of the multiplier
             # real_part = np.real(other)
@@ -118,7 +118,7 @@ class complex_fcn:
         
     def __mul__(self, other): #TODO: ajouter la multiplication par un fctTree réel
         output = complex_fcn(self.mra)
-        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int):
+        if isinstance(other, complex) or isinstance(other, float) or isinstance(other, int) or isinstance(other, np.float64) or isinstance(other, np.float128) or isinstance(other, np.complex128):
             # output = complex_fcn(self.mra)
             # Separate the real and imaginary parts of the multiplier
             real_part = np.real(other)

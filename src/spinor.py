@@ -135,10 +135,10 @@ class spinor:
         return output
     
     def dotFull(self, other):#Even though it is strictly the same as it used to be, now S is 0
-        output = 0.
+        output = 0.0
         for i in range(self.length):
             # print("spinor dot")
-            output += cf.dot(self.compVect[i], other.compVect[i])
+            output = output + cf.dot(self.compVect[i], other.compVect[i]) 
         return output
     
     def dotKramer(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
@@ -156,6 +156,26 @@ class spinor:
             return output
         else:
             return self.dot(other)
+        
+    def dotKramerFull(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
+        #Simple 2 component implementation 
+        output = 0
+        output += -1*cf.dot(self.conjugateComponent(0), other.conjugateComponent(1))
+        output += cf.dot(self.conjugateComponent(1), other.conjugateComponent(0))
+        return output
+        # if self.length > 1:
+        #     output = 0.0
+        #     for i in range(0, self.length, 2):
+        #         # print("spinor dot")
+        #         output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1])
+        #         output += cf.dot(self.compVect[2*i+1], other.conjugateComponent(2*i))
+        #         # output += -1*cf.dot(self.conjugateComponent(2*i), other.compVect[2*i+1]) #TODO: maybe broken, see multKramer for possibly the non-broken version
+        #         # output += cf.dot(self.conjugateComponent(2*i+1), other.compVect[2*i])
+        #         # output -= -1 * self.conjugateComponent(2*i).dot(other.compVect[2*i+1])
+        #         # output = output + self.compVect[2*i+1] * other.conjugateComponent(2*i)
+        #     return output
+        # else:
+        #     return self.dot(other)
         
     def multKramer(self, other):
         # output = spinor(self.mra, self.length)
