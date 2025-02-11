@@ -147,7 +147,8 @@ class scfsolv:
 
         # print("S initial guess = ", self.computeOverlap())
 
-        # self.printOperators()
+        print("init guess operators")
+        self.printOperators()
         #Compute the Fock matrix and potential operators 
         self.compFock()
         # print("Fock = ", self.Fock)
@@ -155,9 +156,10 @@ class scfsolv:
         self.E_n = []
         #internal nuclear energy
         self.E_pp = self.fpp()
+        print("Nuclear Energy", self.E_pp)
         # Prepare Helmholtz operators
         self.G_mu = []
-        # print("Overlap init post-fock")
+        print("Overlap init post-fock")
         # print("S=",self.computeOverlap())
         self.printOperators()
         # print("initial step now")
@@ -179,7 +181,7 @@ class scfsolv:
             # Compute update = ||phi^{n+1} - phi^{n}|| #6
             # print("Post power Iter, pre normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.f_prev[orb].append(phi_np1 - self.phi_prev[orb][-1])
-            tuttest = phi_np1.compNorm() #debug
+            # tuttest = phi_np1.compNorm() #debug
             # print(" ===== phi_np1 norm (ok?)= ", tuttest) #debug
             phi_np1.normalize()
             # for i in range(self.Ncomp):
@@ -192,6 +194,8 @@ class scfsolv:
             if len(self.phi_prev[orb]) > self.khist: #deleting the first element if we don't want to use KAIN
                 del self.phi_prev[orb][0]
                 # del self.f_prev[orb][0]
+        print("initguess post poweriter")
+        self.printOperators()
         # print("Overlap init post-1st iteration")
         # print("S=",self.computeOverlap())
         #Orthonormalise orbitals since they are molecular orbitals
@@ -201,6 +205,8 @@ class scfsolv:
         # phi_ortho = self.orthonormaliseKramer()
         for orb in range(self.Nspinor): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
+        print("initguess end ")
+        self.printOperators()
         # print("Overlap init end")
         #     print(orb, " length update history: ", len(self.f_prev[orb]))
         # print("Init molec S=",self.computeOverlap())
@@ -238,13 +244,13 @@ class scfsolv:
         #kappa operator
         kappa = spinor(self.mra, self.Ncomp)
         kappa.setZero()
-        Gmap = vp.FunctionMap(fmap = self.computeKappaMinus1, prec=self.prec)
+        Gmap = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
         # print("kappa before")
         for j in range(self.Ncomp): #TODO: use function mapping
             # print("kappa compo", j)
-            # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinus1(r,j))
+            # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinusOneHalf(r,j))
             # V_z = self.Vnuc + self.J
-            # vp.advanced.map(lambda r : prec=self.prec, out=kappa, inp=V_z, fmap = self.computeKappaMinus1(r, j))
+            # vp.advanced.map(lambda r : prec=self.prec, out=kappa, inp=V_z, fmap = self.computeKappaMinusOneHalf(r, j))
             # kappa.compVect[j].real = Gmap(V_z.compVect[j].real) #OldVnuc
             kappa.compVect[j].real = Gmap(V_z)
             # kappa.compVect[j].real = self.P_eps(lambda r: np.real(V_z(j,r))*((4*self.c**2 - 2*np.real(V_z(j,r)))**(-1))) #representing kappa -1/2, w/ kappa = 0.5 *(1-V/2c^2)^-1
@@ -278,7 +284,7 @@ class scfsolv:
         halfNab2 =  halfNab2.crop(self.prec)
 
         # print("compFop kNab2 done")
-        #second scalar term: -0.5 *nabla(kappa) * nabla 
+        #second scalar term: nabla(kappa) * nabla 
         NabkNab = spinor(self.mra, self.Ncomp)
         NabkNab.setZero()
         NabkNab = dkappa[0] * dphi[0]
@@ -286,6 +292,7 @@ class scfsolv:
         NabkNab = NabkNab + dkappa[1] * dphi[1]
         # NabkNab = NabkNab.crop(self.prec)
         NabkNab = NabkNab + dkappa[2] * dphi[2]
+        #
         NabkNab = NabkNab.crop(self.prec)
         # print("compFop NabkNab done") #"where kappa^-1 here?", no kappa^-1 here because it's not the scf eqt here, it's the hamiltonian
 
@@ -314,7 +321,7 @@ class scfsolv:
         Tphi = (-1)*(kNab2 + halfNab2 + NabkNab) 
         # Tphi = (-1)*(kNab2 + NabkNab) 
         if self.scalar == False:
-            Tphi = Tphi - sporb #TODO: test to see if there is an issue with memory SCALARDEBUG
+            Tphi = Tphi + (-1)*sporb #TODO: test to see if there is an issue with memory SCALARDEBUG
         
         #used for printing/debugging
         if len(self.Kinetic_op) <= orb:
@@ -382,7 +389,7 @@ class scfsolv:
         # for i in range(len(self.Z)):
         #     sum_e += self.Z[i]
         if self.Nel > 1:
-            PNbr = 4*np.pi*self.phi_prev[0][-1].dot(self.phi_prev[0][-1]) #Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
+            PNbr = 4*np.pi*self.phi_prev[0][-1].dot(self.phi_prev[0][-1])*2 #Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
             for orb in range(1, self.Nspinor): #Maybe Nel? 
             # for orb in range(1, self.Nspinor):#TestNoMultKramer
                 PNbr = PNbr + 4*np.pi*self.phi_prev[orb][-1].dot(self.phi_prev[orb][-1])*2 #NOTE: the factor 2 takes into account the kramer conjugated electron, this fct is not general in that regards (only closed shell)
@@ -626,7 +633,7 @@ class scfsolv:
         kappa = spinor(self.mra, self.Ncomp) #represents kappa - 1/2 for simplicity
         kappa_m1 = spinor(self.mra, self.Ncomp) #represents the inverse of kappa (NOT kappa -1/2)
         # kappa_minus_1 = self.P_eps(lambda r: np.real(V_z(0, r))*((4*self.c**2 - 2*np.real(V_z(0,r)))**(-1))).crop(self.prec)
-        Gmap = vp.FunctionMap(fmap = self.computeKappaMinus1, prec=self.prec)
+        Gmap = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
         Gmap_kappa = vp.FunctionMap(fmap = self.computeKappa, prec=self.prec)
         # kappa_alt = spinor(self.mra, self.Ncomp)
         for j in range(self.Ncomp):
@@ -637,7 +644,7 @@ class scfsolv:
             # kappa_m1.compVect[j].real = self.P_eps(lambda r: 1-V_z(r)/(2*self.c**2)) 
             kappa_m1.compVect[j].real = Gmap_kappa(V_z)
             # kappa.compVect[j].real = kappa_minus_1
-            # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinus1(r,j))
+            # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinusOneHalf(r,j))
             # kappa_m1.compVect[j].real = self.P_eps(lambda r: np.real(4*self.c**2/np.real(V_z(j,r)) - 2))
         kappa_m1 = kappa_m1.crop(self.prec)
         # print("Kappa = ",kappa.compVect[0].real)
@@ -651,18 +658,16 @@ class scfsolv:
 
         # print("PowerIter derivatives stored")
 
-
-        #TODO: Ça bouffe une tétrachiée de mémoire ce truc
         #First SCF term (potential-like)
         # VJkappa = (self.Vnuc + self.J)*kappa_m1
         # VJkappa.crop(self.prec)
         # print("VJkappa ok")
-        Vkphi = (((self.Vnuc + self.J)*kappa_m1).crop(self.prec)*self.phi_prev[orb][-1]).crop(self.prec) - (self.K[orb]*kappa_m1).crop(self.prec)
+        Vkphi = ((kappa_m1*(self.Vnuc + self.J)).crop(self.prec)*self.phi_prev[orb][-1]).crop(self.prec) - (kappa_m1*self.K[orb]).crop(self.prec)
         # Vkphi.crop(self.prec)
         # print("Vkphi ok")
         # VzFock =( V_z/(self.c**2) * self.Fock[orb, orb]).crop(self.prec)
         # VzFock.crop(self.prec)
-        VzFphi = ((( V_z/(self.c**2) * self.Fock[orb, orb]).crop(self.prec)) * self.phi_prev[orb][-1] ).crop(self.prec)
+        VzFphi = ((( (self.c**2)*V_z * self.Fock[orb, orb]).crop(self.prec)) * self.phi_prev[orb][-1] ).crop(self.prec) - ((self.c**2)*self.Fock[orb, orb]*self.K[orb]).crop(self.prec)
         # print("VzFock ok")
         # VzFock = 0
         # VzFphi.crop(self.prec)
@@ -811,7 +816,7 @@ class scfsolv:
             # out += -self.Z[i]/np.sqrt((r[0]-self.R[i][0])**2 + (r[1]-self.R[i][1])**2 + (r[2]-self.R[i][2])**2) 
         return out
     
-    # def computeKappaMinus1(self, r, component, threshold=1e-2):
+    # def computeKappaMinusOneHalf(self, r, component, threshold=1e-2):
     #     close_idx = -1
     #     # print("computekappa start")
     #     for nuc in range(len(self.Z)):
@@ -836,7 +841,7 @@ class scfsolv:
     #     # V_z = self.Vnuc + self.J
     #     # return np.real(V_z(component, r))/(4*self.c**2 - 2*np.real(V_z(component,r)))
 
-    def computeKappaMinus1(self, VzComponent): #Computes (kappa -1/2)^-1
+    def computeKappaMinusOneHalf(self, VzComponent): #Computes (kappa -1/2)
         return np.real(VzComponent)/(4*self.c**2 - 2*np.real(VzComponent))
 
     def computeKappa(self, VzComponent):
@@ -1013,7 +1018,46 @@ class scfsolv:
         if np.imag(phi0_Kconj.dotFull(phi_ortho[1])) > self.prec or np.imag(phi_ortho[0].dotFull(phi1_Kconj)) > self.prec:
             ValueError("Kramer pairs have become imaginary")
         return phi_ortho
-        
+    
+    def orthonormaliseGramSchmidt_3orb(self, phi_in = None):
+        print("WARNING, GS for 6 electrons")
+        # if phi_in == None:
+        #     phi_in = self.phi_prev
+        # S = self.computeOverlap(phi_in)
+        # phi_ortho = [phi_in[0][-1]]
+        # for i in range(1, len(phi_in)):
+        #     norm = phi_in[0][-1].dotFull(phi_in[0][-1])
+        #     orthogonaliser = S[0,2]/norm*phi_in[0][-1]
+        # === Orthogonalise orbitals with each other ===
+        # print("orthonorm")
+        if phi_in == None:
+            phi_in = self.phi_prev
+            # length = self.Nspinor
+        # else: 
+        #     length = len(phi_in)
+        S = self.computeOverlap(phi_in)
+        phi_ortho = []
+        phi_ortho.append(phi_in[0][-1])
+        # norm = phi_in[0][-1].compSqNorm()
+        # norm = phi_in[0][-1].compNorm()
+        norm = np.sqrt(phi_in[0][-1].dotFull(phi_in[0][-1]))
+        phi_ortho[0].normalize()
+        # phitilde_ortho = phi_in[0][-1].kramerConjugate() - 1/norm*(phi_in[0][-1].kramerConjugate()).dot(phi_in[0][-1])*phi_in[0][-1]
+        # phitilde_ortho.normalize()
+        # print("test4", phitilde_ortho.dotFull(phi_in[0][-1]))
+        phi_ortho.append(phi_in[1][-1] - 1/norm*complex(S[0,2])*phi_in[0][-1] - 1/norm*complex(S[1,2])*(phi_in[0][-1].kramerConjugate()))#TODO: séparer en deux lignes différentes (simplifier)
+        # phi_ortho.append(phi_in[1][-1] - 1/norm*(phi_in[0][-1].dot(phi_in[1][-1]))*phi_in[0][-1] - 1/norm*((phitilde_ortho).dot(phi_in[1][-1]))*phitilde_ortho)
+        # phi_ortho.append(phi_in[1][-1] - 1/norm*(phi_in[1][-1].dotFull(phi_in[0][-1]))*phi_in[0][-1] - 1/norm*(phi_in[1][-1].dotFull(phi_in[0][-1].kramerConjugate()))*(phi_in[0][-1].kramerConjugate()))
+        phi_ortho[1].normalize()
+        phi_ortho.append(phi_in[2][-1] - 1/norm*complex(S[0,4])*phi_in[0][-1] - 1/norm*complex(S[1,4])*(phi_in[0][-1].kramerConjugate()) - 1/norm*complex(S[2,4])*phi_in[1][-1] - 1/norm*complex(S[3,4])*(phi_in[1][-1].kramerConjugate()))
+        # phi0_Kconj = phi_ortho[0].kramerConjugate()
+        # phi1_Kconj = phi_ortho[1].kramerConjugate()
+        # print("Orthonormalise GS",phi_ortho[0].dotFull(phi_ortho[1]), phi0_Kconj.dotFull(phi_ortho[1]), phi_ortho[0].dotFull(phi1_Kconj))
+        # if np.imag(phi0_Kconj.dotFull(phi_ortho[1])) > self.prec or np.imag(phi_ortho[0].dotFull(phi1_Kconj)) > self.prec:
+        #     ValueError("Kramer pairs have become imaginary")
+        return phi_ortho
+
+
     
     def orthonormaliseKramer(self, phi_in = None, normalise = True):# DEPRECATED -- TODO! Problème!!!!! la boucle for devrait pas Être sur les compononents parce qu'un spineur représente 1 électron
         # === Orthonormalise orbitals according to Karmer's paiers
