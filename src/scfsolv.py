@@ -135,6 +135,7 @@ class scfsolv:
             elif guess_type == 1:  #Slater-type orbitals initial guess for Hydrogen-like atoms
                 phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
             elif guess_type == 2: #Load Paired orbitals files from MRCHem
+                print(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")
                 phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  
             else: #Load Restricted orbitals files from MRCHem
                 if i%2 == 0:
