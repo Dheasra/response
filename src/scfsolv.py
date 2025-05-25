@@ -45,6 +45,7 @@ class scfsolv:
     Kinetic_op : list                       #Kinetic operator applied to each orbitals. Used for debugging
     Nel : int                               #Number of electrons
     scalar : bool                           #Selection between scalar ZORA or spin-orbit interations
+    orbital : int                           #Index of the current orbital (use for the construction of the kappa operator in the Cowan-Griffin method)
 
 
     # Constructor of the class
@@ -94,6 +95,7 @@ class scfsolv:
         # self.Kinetic.setZero() 
         self.Kinetic_op = []
         self.scalar = scalar
+        self.orbital = 0
 
         self.tutiter = 0
 
@@ -109,6 +111,7 @@ class scfsolv:
         self.Z = Z
         self.Nel = No
         self.Nspinor = int(max(1, np.floor(No/2)))
+        print("Nspinor = ", self.Nspinor)
         # self.Nel = 0
         self.scalar = sclr
         # # computing the number of electrons (Nel)
@@ -148,6 +151,8 @@ class scfsolv:
 
         # print("S initial guess = ", self.computeOverlap())
 
+        self.E_n = [0.0 for i in range(self.Nspinor)] #initial guess for the energy
+
         print("init guess operators")
         self.printOperators()
         #Compute the Fock matrix and potential operators 
@@ -162,8 +167,8 @@ class scfsolv:
         self.G_mu = []
         print("Overlap init post-fock")
         # print("S=",self.computeOverlap())
-        self.printOperators()
-        # print("initial step now")
+        # self.printOperators()
+        print("initial step now")
         for i in range(self.Nspinor):
             # print("Helmholtz operator init ", i)
             self.E_n.append(self.Fock[i,i])
@@ -182,6 +187,7 @@ class scfsolv:
             # Compute update = ||phi^{n+1} - phi^{n}|| #6
             # print("Post power Iter, pre normalize", orb, complex_fcn.dot(phi_np1, phi_np1))
             self.f_prev[orb].append(phi_np1 - self.phi_prev[orb][-1])
+            print("Initmolec norm update", self.f_prev[orb][-1].compNorm(), phi_np1.compNorm(), self.phi_prev[orb][-1].compNorm(), phi_np1.dotFull(self.phi_prev[orb][-1]))
             # tuttest = phi_np1.compNorm() #debug
             # print(" ===== phi_np1 norm (ok?)= ", tuttest) #debug
             phi_np1.normalize()
@@ -202,6 +208,8 @@ class scfsolv:
         #Orthonormalise orbitals since they are molecular orbitals
         # print("tut initmolec")
         phi_ortho = self.orthonormalise()
+
+        print("Length of phi_prev", len(self.phi_prev), len(phi_ortho))
         # print("tut2 initmolec")
         # phi_ortho = self.orthonormaliseKramer()
         for orb in range(self.Nspinor): #Mandatory loop due to questionable data format choice.
@@ -245,6 +253,7 @@ class scfsolv:
         #kappa operator
         kappa = spinor(self.mra, self.Ncomp)
         kappa.setZero()
+        self.orbital = orb
         Gmap = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
         # print("kappa before")
         for j in range(self.Ncomp): #TODO: use function mapping
@@ -279,9 +288,10 @@ class scfsolv:
         #second part of the first term, to correct for the use of kappa-1/2, so -1/2 * nabla^2
         halfNab2 = spinor(self.mra, self.Ncomp)
         halfNab2.setZero()
-        halfNab2 = 0.5*dphi[0].derivative(0)
-        halfNab2 = halfNab2 + 0.5*dphi[1].derivative(1)
-        halfNab2 = halfNab2 + 0.5*dphi[2].derivative(2)
+        factor = self.c**2 / (2*self.c**2 + self.E_n[orb])
+        halfNab2 = factor * dphi[0].derivative(0)
+        halfNab2 = halfNab2 + factor * dphi[1].derivative(1)
+        halfNab2 = halfNab2 + factor * dphi[2].derivative(2)
         halfNab2 =  halfNab2.crop(self.prec)
 
         # print("compFop kNab2 done")
@@ -351,7 +361,65 @@ class scfsolv:
         # print("CompFop", orb, complex_fcn.dot(self.J * self.phi_prev[orb][-1], self.J * self.phi_prev[orb][-1]))
         # Fphi_test = Tphi
         # print("CompFop real", orb, Fphi.dot(Fphi))
+        # FKphi = self.compFopKexpansion(orb)
+
+        # Fphi = Fphi + FKphi
         return Fphi
+
+    def compFopKexpansion(self, orb):
+        print("compoFopKexpansion")
+        V_hartree = self.Vnuc + self.J
+        alphainv = spinor(self.mra, self.Ncomp)
+        self.orbital = orb
+        Gmap = vp.FunctionMap(fmap = self.computeAlphaInverse, prec=self.prec)
+        for j in range(self.Ncomp):
+            alphainv.compVect[j].real = Gmap(V_hartree)
+
+        dphi = [self.phi_prev[orb][-1].derivative(0).crop(self.prec), self.phi_prev[orb][-1].derivative(1).crop(self.prec), self.phi_prev[orb][-1].derivative(2).crop(self.prec)] 
+        
+        # kappa = spinor(self.mra, self.Ncomp)
+        # kappa.setZero()
+        # self.orbital = orb
+        # Gmap_kappa = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
+        # # print("kappa before")
+        # for j in range(self.Ncomp):
+        #     kappa.compVect[j].real = Gmap_kappa(V_hartree)
+        # dkappa = [kappa.derivative(0).crop(self.prec), kappa.derivative(1).crop(self.prec), kappa.derivative(2).crop(self.prec)]
+
+        #Compute the first term, the correction to the laplacian of the wavefunction
+        Knabla2phi = spinor(self.mra, self.Ncomp)
+        kNab2 = spinor(self.mra, self.Ncomp)
+        kNab2.setZero()
+        kNab2 = dphi[0].derivative(0)
+        kNab2 = kNab2 + dphi[1].derivative(1)
+        kNab2 = kNab2 + dphi[2].derivative(2)
+        kNab2 =  kNab2.crop(self.prec)
+        Knabla2phi = self.computeExchangePotential(kNab2)
+        Knabla2phi = Knabla2phi.crop(self.prec)
+        Knabla2phi = ((self.c**2)*alphainv*alphainv*Knabla2phi).crop(self.prec)
+
+        #Compute the second term, the correction to the scalar product between the gradient of kappa and the gradient of the wavefunction
+        NablaKnablaphi = spinor(self.mra, self.Ncomp)
+        NablaKnablaphi.setZero()
+        alpha2Knabphi = [(alphainv*alphainv*self.computeExchangePotential(dphi[0])).crop(self.prec), (alphainv*alphainv*self.computeExchangePotential(dphi[1])).crop(self.prec), (alphainv*alphainv*self.computeExchangePotential(dphi[2])).crop(self.prec)]
+        NablaKnablaphi = alpha2Knabphi[0].derivative(0) + alpha2Knabphi[1].derivative(1) + alpha2Knabphi[2].derivative(2)
+        NablaKnablaphi = ((self.c**2)*NablaKnablaphi).crop(self.prec)
+
+        #Compute the third term, the correction to the spin-orbit interaction
+        sporb_corr = spinor(self.mra, self.Ncomp)
+        sporb_corr.setZero()
+        sporb_corr = 1j * (self.c**2) * utils.apply_Pauli(0,alpha2Knabphi[1].derivative(2)-alpha2Knabphi[2].derivative(1)).crop(self.prec)
+        sporb_corr = sporb_corr  + 1j * (self.c**2) * utils.apply_Pauli(1,alpha2Knabphi[2].derivative(0)-alpha2Knabphi[0].derivative(2)).crop(self.prec)
+        sporb_corr = sporb_corr + 1j * (self.c**2) * utils.apply_Pauli(2,alpha2Knabphi[0].derivative(1)-alpha2Knabphi[1].derivative(0)).crop(self.prec)
+        sporb_corr = sporb_corr.crop(self.prec)
+        # print("compFop sporb done")
+
+        FKphi = Knabla2phi - NablaKnablaphi
+        if self.scalar == False:
+            FKphi = FKphi - sporb_corr
+
+        return FKphi
+
 
     #Computes the product between an electron in orbital orb1 and another in orbital orb2
     # orb1[in]: integer index of the left (bra) element of the product 
@@ -431,10 +499,11 @@ class scfsolv:
     #This method computes the exchange operator applied to an orbital of index "idx"
     # idx[in]: integer index of the chosen orbital in the list of orbitals "phi_prev"
     # [out]: function tree (vp.FunctionTree) representation of the operator
-    def computeExchangePotential(self, idx): #TODO: corrgier pour inclure plus qu'une orbitale!
-        # sum_e = 0
-        # for i in range(len(self.Z)):
-        #     sum_e += self.Z[i]
+    def computeExchangePotential(self, inp): #TODO: corrgier pour inclure plus qu'une orbitale!
+        if type(inp) == int or type(inp) == float:
+            phi_inp = self.phi_prev[inp][-1]    
+        else:
+            phi_inp = inp
         if self.Nel > 1:
             # Korb = spinor(self.mra, self.Ncomp)
             # Korb.setZero()
@@ -445,8 +514,8 @@ class scfsolv:
             Korb = spinor(self.mra, self.Ncomp)
             Korb.setZero()
             for j in range(self.Nspinor):
-                Korb = Korb + self.phi_prev[j][-1] * self.Pois(4*np.pi*(self.phi_prev[j][-1].dot(self.phi_prev[idx][-1])).real) 
-                Korb = Korb + (self.phi_prev[j][-1].kramerConjugate()) * self.Pois(4*np.pi*((self.phi_prev[j][-1].kramerConjugate()).dot(self.phi_prev[idx][-1])).real)
+                Korb = Korb + self.phi_prev[j][-1] * self.Pois(4*np.pi*(self.phi_prev[j][-1].dot(phi_inp)).real) 
+                Korb = Korb + (self.phi_prev[j][-1].kramerConjugate()) * self.Pois(4*np.pi*((self.phi_prev[j][-1].kramerConjugate()).dot(phi_inp)).real)
             return Korb
         else: 
             print("compute Korb only 1 e")
@@ -532,6 +601,7 @@ class scfsolv:
         
         for orb in range(self.Nspinor):
             self.f_prev[orb].append(phistory[orb] - self.phi_prev[orb][-1])
+            print("Expand Sol norm update", self.f_prev[orb][-1].compNorm())
             #Setup and solve the linear system Ac=b
             c = self.setupLinearSystem(orb)
             #Compute the correction delta to the orbitals 
@@ -581,6 +651,7 @@ class scfsolv:
             self.G_mu[orb] = vp.HelmholtzOperator(self.mra, mu, self.prec) 
             #Compute new power iteration for the Helmholtz operator
             phi_np1 = self.powerIter(orb)        
+            phi_np1.normalize()
         #     #create an alternate history of orbitals which include the power iteration
         #     phistory.append([phi_np1])
         # #Orthonormalise the alternate orbital history
@@ -598,6 +669,7 @@ class scfsolv:
             #Apply correction
             print("length",len(self.f_prev), len(self.f_prev[orb]),)
             self.f_prev[orb][-1] = phi_np1 - self.phi_prev[orb][-1]
+            print("Expand Sol norm update", self.f_prev[orb][-1].compNorm(), phi_np1.compNorm(), self.phi_prev[orb][-1].compNorm(), phi_np1.dotFull(self.phi_prev[orb][-1]))
             # self.phi_prev[orb][-1] = phi_np1
             #Normalize
             # norm_Re  = phi_n.real.norm()
@@ -633,7 +705,9 @@ class scfsolv:
         # kappa_m1 = one-V_z/(2*self.c**2)
         kappa = spinor(self.mra, self.Ncomp) #represents kappa - 1/2 for simplicity
         kappa_m1 = spinor(self.mra, self.Ncomp) #represents the inverse of kappa (NOT kappa -1/2)
+        
         # kappa_minus_1 = self.P_eps(lambda r: np.real(V_z(0, r))*((4*self.c**2 - 2*np.real(V_z(0,r)))**(-1))).crop(self.prec)
+        self.orbital = orb
         Gmap = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
         Gmap_kappa = vp.FunctionMap(fmap = self.computeKappa, prec=self.prec)
         # kappa_alt = spinor(self.mra, self.Ncomp)
@@ -668,13 +742,14 @@ class scfsolv:
         # print("Vkphi ok")
         # VzFock =( V_z/(self.c**2) * self.Fock[orb, orb]).crop(self.prec)
         # VzFock.crop(self.prec)
-        VzFphi = ((( (self.c**2)*V_z * self.Fock[orb, orb]).crop(self.prec)) * self.phi_prev[orb][-1] ).crop(self.prec) - ((self.c**2)*self.Fock[orb, orb]*self.K[orb]).crop(self.prec)
+        VzFphi = ((( (self.c**(-2)) *V_z * self.Fock[orb, orb]).crop(self.prec)) * self.phi_prev[orb][-1] ).crop(self.prec) - ((self.c**(-2))*self.Fock[orb, orb]*self.K[orb]).crop(self.prec)
         # print("VzFock ok")
         # VzFock = 0
         # VzFphi.crop(self.prec)
         # print("VzFphi ok")
         P_scf = (Vkphi + VzFphi).crop(self.prec)
-        Vkphi = 0
+        print("PowerIter Potential norm", Vkphi.compNorm(), VzFphi.compNorm())
+        # Vkphi = 0
         # VJkappa = 0
         # print("P I T3 ok")
 
@@ -699,6 +774,11 @@ class scfsolv:
         # So_so = So_so - 1j * kappa_m1 # * utils.apply_Pauli(2,-0.5*(dkappa[0]*dphi[1]-dkappa[1]*dphi[0]))
         # print("P I T2 ok")
         So_so = So_so.crop(self.prec)
+
+        # print("test VF (A) term ", self.phi_prev[0][-1].dotFull(P_scf*self.phi_prev[0][-1]))
+        # print("test div term ", self.phi_prev[0][-1].dotFull(So_scl*self.phi_prev[0][-1]))
+        # print("test so term ", self.phi_prev[0][-1].dotFull(So_so*self.phi_prev[0][-1]))
+        # print("test Vk (D) term ", self.phi_prev[0][-1].dotFull(P_scf*self.phi_prev[0][-1]))
         
         #Fourth SCF term (Non-canonical basis correction)
         Fij_phij = spinor(self.mra, self.Ncomp)
@@ -719,6 +799,8 @@ class scfsolv:
         phi_np1_tmp = P_scf - So_scl - Fij_phij
         if self.scalar == False:
             phi_np1_tmp = phi_np1_tmp - So_so 
+
+        print("PowerIter norm pre Helmholtz", phi_np1_tmp.compNorm(), P_scf.compNorm(), So_scl.compNorm(), So_so.compNorm(), Fij_phij.compNorm())
         for l in range(self.Ncomp): #TODO: norme est le double de ce qu'elle devrait être, voire le quadruple
             if(phi_np1_tmp.compVect[l].real.squaredNorm() > 1e-12):
                 # print("PowerIter Orb ok", orb)
@@ -734,6 +816,100 @@ class scfsolv:
         dphi = []
 
         return phi_np1
+
+    def powerIter_K_corrections(self, orb):
+        print("power Iter K corrections")
+         #Zora potential
+        V_hartree = self.Vnuc + self.J
+        kappa = spinor(self.mra, self.Ncomp) #represents kappa - 1/2 for simplicity
+        kappa_m1 = spinor(self.mra, self.Ncomp) #represents the inverse of kappa (NOT kappa -1/2)
+        
+        # kappa_minus_1 = self.P_eps(lambda r: np.real(V_hartree(0, r))*((4*self.c**2 - 2*np.real(V_hartree(0,r)))**(-1))).crop(self.prec)
+        self.orbital = orb
+        Gmap = vp.FunctionMap(fmap = self.computeKappaMinusOneHalf, prec=self.prec)
+        Gmap_kappa = vp.FunctionMap(fmap = self.computeKappa, prec=self.prec)
+        # kappa_alt = spinor(self.mra, self.Ncomp)
+        for j in range(self.Ncomp):
+            # print("kappa compo", j)
+            # kappa_alt.compVect[j].real = self.P_eps(lambda r: 0.5*(1-np.real(V_hartree(j, r))/(2*self.c**2))**(-1)) #TODO: checker les 1/2
+            # kappa.compVect[j].real = Gmap(V_hartree.compVect[j].real) #OldVnuc
+            kappa.compVect[j].real = Gmap(V_hartree)
+            # kappa_m1.compVect[j].real = self.P_eps(lambda r: 1-V_hartree(r)/(2*self.c**2)) 
+            kappa_m1.compVect[j].real = Gmap_kappa(V_hartree)
+            # kappa.compVect[j].real = kappa_minus_1
+            # kappa.compVect[j].real = self.P_eps(lambda r: self.computeKappaMinusOneHalf(r,j))
+            # kappa_m1.compVect[j].real = self.P_eps(lambda r: np.real(4*self.c**2/np.real(V_hartree(j,r)) - 2))
+        kappa_m1 = kappa_m1.crop(self.prec)
+        # print("Kappa = ",kappa.compVect[0].real)
+        # print("Kappa_alt = ",kappa_alt.compVect[0].real)
+        # kappa = kappa_m1**(-1)
+        kappa = kappa.crop(self.prec)
+        # print("Power Iter Kappa ok")
+        
+        dkappa = [kappa.derivative(0).crop(self.prec), kappa.derivative(1).crop(self.prec), kappa.derivative(2).crop(self.prec)]
+        dphi = [self.phi_prev[orb][-1].derivative(0).crop(self.prec), self.phi_prev[orb][-1].derivative(1).crop(self.prec), self.phi_prev[orb][-1].derivative(2).crop(self.prec)]
+
+        KVphi = 1/(2*self.c**2) * self.computeExchangePotential(V_hartree * self.phi_prev[orb][-1])
+        KVphi = KVphi.crop(self.prec)
+
+        kappaKphi = kappa_m1 * self.computeExchangePotential(self.phi_prev[orb][-1])
+        kappaKphi = kappaKphi.crop(self.prec)
+
+        KFiiphi = 1/(self.c**2) * self.Fock[orb, orb] * self.computeExchangePotential(self.phi_prev[orb][-1])
+        KFiiphi = KFiiphi.crop(self.prec)
+
+        KNabkappaNabphi = 1/(self.c**2) * self.computeExchangePotential(dkappa[0]*dphi[0] + dkappa[1]*dphi[1] + dkappa[2]*dphi[2])
+        KNabkappaNabphi.crop(self.prec)
+
+        alphainv2 = spinor(self.mra, self.Ncomp)
+        self.orbital = orb
+        Gmap = vp.FunctionMap(fmap = self.computeAlphaInverse, prec=self.prec)
+        for j in range(self.Ncomp):
+            alphainv2.compVect[j].real = Gmap(V_hartree)
+        alphainv2 = alphainv2*alphainv2
+
+        nabladotKnablaphi = (alphainv2*self.computeExchangePotential(dphi[0])).derivative(0)
+        nabladotKnablaphi = nabladotKnablaphi + (alphainv2*self.computeExchangePotential(dphi[1])).derivative(1)
+        nabladotKnablaphi = nabladotKnablaphi + (alphainv2*self.computeExchangePotential(dphi[2])).derivative(2)
+        nabladotKnablaphi.crop(self.prec)
+
+        Knab2phi = 2*alphainv2*self.computeExchangePotential(dphi[0].derivative(0) + dphi[1].derivative(1) + dphi[2].derivative(2))
+        Knab2phi = Knab2phi.crop(self.prec)
+
+        nabladotKnablaphi = (self.c**(-2))*kappa_m1*(nabladotKnablaphi - Knab2phi)
+        nabladotKnablaphi.crop(self.prec)
+        Knab2phi = 0
+        nabladotKnablaphi = 0
+
+        So_so = spinor(self.mra, self.Ncomp)
+        So_so.setZero()
+        So_so = utils.apply_Pauli(0,dkappa[1]*dphi[2]-dkappa[2]*dphi[1]).crop(self.prec)
+        So_so = So_so + utils.apply_Pauli(1,dkappa[2]*dphi[0]-dkappa[0]*dphi[2]).crop(self.prec)
+        So_so = So_so + utils.apply_Pauli(2,dkappa[0]*dphi[1]-dkappa[1]*dphi[0]).crop(self.prec)
+        So_so = 0.5j * (self.c**(-2)) * self.computeExchangePotential(So_so)
+        So_so = So_so.crop(self.prec)
+
+        So_Kphi = spinor(self.mra, self.Ncomp)
+        So_Kphi.setZero()
+        So_Kphi = utils.apply_Pauli(0,(alphainv2*self.computeExchangePotential(dphi[2])).derivative(1) -(alphainv2*self.computeExchangePotential(dphi[1])).derivative(2) ).crop(self.prec)
+        So_Kphi = So_Kphi + utils.apply_Pauli(1,(alphainv2*self.computeExchangePotential(dphi[0])).derivative(2) -(alphainv2*self.computeExchangePotential(dphi[2])).derivative(0) ).crop(self.prec)
+        So_Kphi = So_Kphi + utils.apply_Pauli(2,(alphainv2*self.computeExchangePotential(dphi[1])).derivative(0) -(alphainv2*self.computeExchangePotential(dphi[0])).derivative(1) ).crop(self.prec)
+        So_Kphi = 1j * (self.c**2) * kappa_m1 * self.computeExchangePotential(So_Kphi)
+        So_Kphi = So_Kphi.crop(self.prec)
+
+        #Fourth SCF term (Non-canonical basis correction)
+        KFijphi = spinor(self.mra, self.Ncomp)
+        KFijphi.setZero()
+        for orb2 in range(self.Nspinor):
+            # print("PowerIter debug: ", type(self.Fock[orb, orb2]*self.phi_prev[orb2][-1]), self.Fock[orb, orb2]*self.phi_prev[orb2][-1],  "tut", type(self.phi_prev[orb2][-1]))
+            #Compute off-diagonal Fock matrix elements
+            if orb2 != orb:
+                # KFijphi = KFijphi + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
+                KFijphi = KFijphi + self.Fock[orb, orb2]*self.phi_prev[orb2][-1]
+        KFijphi = self.computeExchangePotential(KFijphi)
+        KFijphi = KFijphi.crop(self.prec)
+
+        return KVphi - kappaKphi - KFiiphi - KNabkappaNabphi - nabladotKnablaphi - Knab2phi + So_so + So_Kphi - KFijphi
     
     #This method sets up then solve the linear system Ac=b for a specific orbital of idex "orb"
     #This operation can be done independantly for each orbital as the ground state orbitals are separated.
@@ -754,6 +930,8 @@ class scfsolv:
             for j in range(lenHistory-1):
                 A[l,j] = -dPhi.dotFull( self.f_prev[orb][j] - self.f_prev[orb][-1]) 
         #solve Ac = b for c
+        print("Setup Linear System A = ", A)
+        print("Setup Linear System b = ", b)
         c = np.linalg.solve(A, b)
         return c
 
@@ -843,11 +1021,21 @@ class scfsolv:
     #     # return np.real(V_z(component, r))/(4*self.c**2 - 2*np.real(V_z(component,r)))
 
     def computeKappaMinusOneHalf(self, VzComponent): #Computes (kappa -1/2)
-        return np.real(VzComponent)/(4*self.c**2 - 2*np.real(VzComponent))
+        return self.c**2/(2*self.c**2 + self.E_n[self.orbital]) * np.real(VzComponent)/(2*self.c**2 + self.E_n[self.orbital] - np.real(VzComponent))
 
     def computeKappa(self, VzComponent):
         # return 1-np.real(VzComponent)/(2*self.c**2) #Original computation but it seems to be lacking a factor 2
-        return 2.0-np.real(VzComponent)/(self.c**2)
+        return 2.0+(self.E_n[self.orbital]-np.real(VzComponent))/(self.c**2)
+    
+    def computeAlphaInverse(self, VzComponent): #Computes alpha^-1 = 1/(2mc^2 + E0 - Vz)
+        return 1/(2*(self.c**2) + self.E_n[self.orbital] - np.real(VzComponent))
+    
+    def computeExchangeExpansionFactor(self, alphaInverse): #Computes the factor / operator to the left of the exchange operator in the expansion
+        return (self.c**2) * alphaInverse * alphaInverse / (2*(self.c**2) + self.E_n[self.orbital])
+
+    def guassianGuess(self, r, beta = 0.5):
+        alpha = np.power(np.pi/beta, 3/2)
+        return alpha * np.exp(beta * (np.power(r[0],2)+np.power(r[1],2)+np.power(r[2],2)))
 
     #Method to compute the nuclear-nuclear contribution to the energy.
     #[out]: Value of the nuclear-nuclear potential at the position "r" in space
@@ -937,12 +1125,21 @@ class scfsolv:
 
 
     def orthonormalise(self, phi_in = None, Type = "Ldw"): #TODO: change it to Lödwin if not debugging
-        Type = "GS" #TODO: remove this when done debugging
-        if Type == "Ldw":
-            return self.orthonormaliseLoedwin(phi_in, True)
+        # Type = "GS" #TODO: remove this when done debugging
+        if self.Nel <= 2: #Kramer pairs are already orthogonal by construction
+            if phi_in == None:
+                phi_in = self.phi_prev
+            phi_out = [phi_in[orb][-1] for orb in range(self.Nspinor)]
+            for orb in range(self.Nspinor):
+                phi_out[orb].normalize()
+            print("orthonormalise", phi_out[0].compNorm())
+            return phi_out
         else:
-            print("====================WARNING: GRAM SCHMIDT ORTHOGONALISATION =========================")
-            return self.orthonormaliseGramSchmidt(phi_in)
+            if Type == "Ldw":
+                return self.orthonormaliseLoedwin(phi_in, True)
+            else:
+                print("====================WARNING: GRAM SCHMIDT ORTHOGONALISATION =========================")
+                return self.orthonormaliseGramSchmidt(phi_in)
             
     #Lödwin orthogonalisation and normalisation
     #phi_orth[in]: List of List of function trees. The reason for this peculiar choice is the data format of the orbitals and their history. 
@@ -965,7 +1162,7 @@ class scfsolv:
         s = np.diag(np.power(eigvals, -0.5)) #diagonalised S 
         #Compute s^-1/2
         Sprime = np.dot(U,np.dot(s,np.transpose(U))) # S^-1/2 = U^dagger s^-1/2 U
-        length = int(np.floor(self.Nel/2))
+        length = max(1, int(np.floor(self.Nel/2)))
 
         #Apply S' to each orbital to obtain a new orthogonal element
         phi_ortho = []
@@ -976,13 +1173,22 @@ class scfsolv:
             phi_tmp.setZero()
             for j in range(length): #TODO: needs to include the contribution of Kramer pairs
             # for j in range(limit[i]):
-                phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1] + Sprime[2*i, 2*j+1]*phi_in[j][-1].kramerConjugate() #TODO not sufficient 
+                # phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1] + Sprime[2*i, 2*j+1]*phi_in[j][-1].kramerConjugate() #TODO not sufficient 
+                phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1]
                 # phi_tmp = phi_tmp + Sprime[j,i]*phi_in[j][-1] #TODO: Test to orthonormalise
             if normalise: 
                 phi_tmp.normalize()
             phi_tmp = phi_tmp.crop(self.prec)
             phi_ortho.append(phi_tmp)
             phi_test.append([phi_tmp]) #test
+        test_orthonorm = True
+        if test_orthonorm:
+            print("Test orthonorm")
+            for i in range(1,length):
+                for j in range(length):
+                    if j != i:
+                        phi_ortho[i] = phi_ortho[i] - complex(S[2*j+1,2*i])*(phi_in[j][-1].kramerConjugate())
+
         print("Post-Ortho S=", self.computeOverlap(phi_test))#test
         return phi_ortho
     
