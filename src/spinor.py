@@ -137,8 +137,9 @@ class spinor:
     def dotFull(self, other):#Even though it is strictly the same as it used to be, now S is 0
         output = 0.0
         for i in range(self.length):
-            # print("spinor dot")
-            output = output + cf.dot(self.compVect[i], other.compVect[i]) 
+            # print("spinor dot", type(output))
+            output = output + cf.dot(self.compVect[i], other.compVect[i], True) 
+            # output = output + cf.dot(self.conjugateComponent(i), other.compVect[i], True) 
         return output
     
     def dotKramer(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
@@ -160,7 +161,7 @@ class spinor:
     def dotKramerFull(self, other): #computes the "expectation value" of -i*simga_y ⊗ Id , i.e. <self|-i*simga_y|other>
         #Simple 2 component implementation 
         output = 0
-        output += -1*cf.dot(self.conjugateComponent(0), other.conjugateComponent(1))
+        output += -1*cf.dot(self.conjugateComponent(0), other.conjugateComponent(1)) #this is probably wrong because it conjugates the left component again in complex_fcn 
         output += cf.dot(self.conjugateComponent(1), other.conjugateComponent(0))
         return output
         # if self.length > 1:
@@ -196,12 +197,15 @@ class spinor:
         output = spinor(self.mra, self.length)
         if self.length > 1:
             output = spinor(self.mra, self.length)
+            output.setZero()
             for i in range(0, self.length, 2):
                 # print("spinor dot")
                 # output.compVect[2*i] += -1 * self.conjugateComponent(2*i) * other.compVect[2*i+1]
                 # output.compVect[2*i+1] += self.conjugateComponent(2*i+1) * other.compVect[2*i]
-                output.compVect[2*i] += -1 * self.conjugateComponent(2*i+1)
-                output.compVect[2*i+1] += self.conjugateComponent(2*i) 
+                output.compVect[2*i] +=  self.conjugateComponent(2*i+1)
+                output.compVect[2*i+1] += -1 * self.conjugateComponent(2*i) 
+
+            # print("kramer conjugate done", output.dotFull(self))
             return output
         else:
             return self 
@@ -214,7 +218,7 @@ class spinor:
 
     def conjugateComponent(self, idx):
         conj_comp = self.compVect[idx]
-        conj_comp.imag *= -1
+        conj_comp.imag *= -1.0
         return conj_comp
 
     

@@ -46,6 +46,7 @@ class scfsolv:
     Nel : int                               #Number of electrons
     scalar : bool                           #Selection between scalar ZORA or spin-orbit interations
     orbital : int                           #Index of the current orbital (use for the construction of the kappa operator in the Cowan-Griffin method)
+    restricted : bool                       #Selection between restricted and unrestricted HF
 
 
     # Constructor of the class
@@ -58,7 +59,7 @@ class scfsolv:
     # sizeScale[in]: integer setting the unit scale of each box
     # nboxes[in]: integer setting the initial number of boxes. Remember that in 3d, space must be discretised in boxes.
     # scling[in]: floating point number doing something that I don't remember what it is. I confuse it with scale. Leaving it at 1.0 never failed me though.
-    def __init__(self, Ncomponents, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0, scalar = True, lightspeed = 137.03599) -> None:
+    def __init__(self, Ncomponents, prec, khist, lgdrOrder=6, sizeScale=-4, nboxes=2, scling=1.0, scalar = True, lightspeed = 137.03599,  restricted = True) -> None:
         # print("init")
         self.world = vp.BoundingBox(corner=[-1]*3, nboxes=[nboxes]*3, scaling=[scling]*3, scale= sizeScale)
         self.mra = vp.MultiResolutionAnalysis(order=lgdrOrder, box=self.world)
@@ -97,6 +98,8 @@ class scfsolv:
         self.scalar = scalar
         self.orbital = 0
 
+        self.restricted = restricted
+
         self.tutiter = 0
 
     # This method initialises all physical properties of the system.
@@ -110,7 +113,10 @@ class scfsolv:
         self.R = pos
         self.Z = Z
         self.Nel = No
-        self.Nspinor = int(max(1, np.floor(No/2)))
+        if self.restricted:
+            self.Nspinor = int(max(1, np.floor(No/2)))
+        else:
+            self.Nspinor = self.Nel
         print("Nspinor = ", self.Nspinor)
         # self.Nel = 0
         self.scalar = sclr
@@ -127,6 +133,7 @@ class scfsolv:
         #     print("is Vnuc constant???", j, utils.is_constant(self.Vnuc.compVect[j]))
         # #initial guesses provided by mrchem
         for i in range(self.Nspinor):
+        # for i in range(1):
             # print("init guess", i)
             phi = spinor(self.mra, self.Ncomp)
             phi.setZero()
@@ -137,15 +144,30 @@ class scfsolv:
                 phi = source_init_guess.phi_prev[i][-1].reproject(self.P_eps)
             elif guess_type == 1:  #Slater-type orbitals initial guess for Hydrogen-like atoms
                 phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
-            elif guess_type == 2: #Load Paired orbitals files from MRCHem
+            elif guess_type == 2 and self.restricted: #Load Paired orbitals files from MRCHem
                 print(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")
                 phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{paired_idx}_re")  
-            else: #Load Restricted orbitals files from MRCHem
+            elif guess_type == 2 and not self.restricted: #Load Restricted orbitals files from MRCHem
                 if i%2 == 0:
-                    # print(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")
-                    phi.compVect[0].real.loadTree(f"{source_init_guess}phi_a_scf_idx_{paired_idx}_re")
+                    print(f"{source_init_guess}phi_a_scf_idx_{int(np.floor(paired_idx/2))}_re")
+                    phi.compVect[0].real.loadTree(f"{source_init_guess}phi_a_scf_idx_{int(np.floor(paired_idx/2))}_re")
+                    # phi.compVect[0].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{int(np.floor(paired_idx/2))}_re") #shitty hacky way, loading paired orbital in unrestricted HF
                 else: 
-                    phi.compVect[0].real.loadTree(f"{source_init_guess}phi_b_scf_idx_{paired_idx}_re")
+                    print(f"{source_init_guess}phi_b_scf_idx_{int(np.floor(paired_idx/2))}_re")
+                    phi.compVect[0].real.loadTree(f"{source_init_guess}phi_b_scf_idx_{int(np.floor(paired_idx/2))}_re")
+                    # phi.compVect[1].real.loadTree(f"{source_init_guess}phi_p_scf_idx_{int(np.floor(paired_idx/2))}_re")
+                    phi = (-1)*phi
+                
+                #Very shitty way of doing it but who cares
+                # if i == 0:
+                #     phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
+                # elif i == 1:
+                #     phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
+                #     phi = 1j*utils.apply_Pauli(1, phi)
+                # elif i == 2:
+                #     phi.compVect[0].real = self.P_eps(lambda r : self.guess2s(r))
+                # elif i == 3: 
+                #     phi.compVect[1].real = (-1)*self.P_eps(lambda r : self.guess2s(r))
             self.phi_prev.append([phi])
         self.f_prev = [[] for i in range(self.Nspinor)] #list of the corrections at previous steps
 
@@ -154,7 +176,7 @@ class scfsolv:
         self.E_n = [0.0 for i in range(self.Nspinor)] #initial guess for the energy
 
         print("init guess operators")
-        self.printOperators()
+        # self.printOperators()
         #Compute the Fock matrix and potential operators 
         self.compFock()
         # print("Fock = ", self.Fock)
@@ -202,7 +224,7 @@ class scfsolv:
                 del self.phi_prev[orb][0]
                 # del self.f_prev[orb][0]
         print("initguess post poweriter")
-        self.printOperators()
+        # self.printOperators()
         # print("Overlap init post-1st iteration")
         # print("S=",self.computeOverlap())
         #Orthonormalise orbitals since they are molecular orbitals
@@ -215,7 +237,7 @@ class scfsolv:
         for orb in range(self.Nspinor): #Mandatory loop due to questionable data format choice.
             self.phi_prev[orb][-1] = phi_ortho[orb]
         print("initguess end ")
-        self.printOperators()
+        # self.printOperators()
         # print("Overlap init end")
         #     print(orb, " length update history: ", len(self.f_prev[orb]))
         # print("Init molec S=",self.computeOverlap())
@@ -458,14 +480,17 @@ class scfsolv:
         # for i in range(len(self.Z)):
         #     sum_e += self.Z[i]
         if self.Nel > 1:
-            PNbr = 4*np.pi*self.phi_prev[0][-1].dot(self.phi_prev[0][-1])*2 #Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
+            PNbr = 4*np.pi*self.phi_prev[0][-1].dot(self.phi_prev[0][-1])
             for orb in range(1, self.Nspinor): #Maybe Nel? 
             # for orb in range(1, self.Nspinor):#TestNoMultKramer
-                PNbr = PNbr + 4*np.pi*self.phi_prev[orb][-1].dot(self.phi_prev[orb][-1])*2 #NOTE: the factor 2 takes into account the kramer conjugated electron, this fct is not general in that regards (only closed shell)
+                PNbr = PNbr + 4*np.pi*self.phi_prev[orb][-1].dot(self.phi_prev[orb][-1]) 
             # return self.Pois(2*PNbr) #factor of 2 because we sum over the number of orbitals, not electrons
             # output.real = self.Pois(2*PNbr.real)
             # output.imag = self.Pois(2*PNbr.imag)
             # return utils.apply_Poisson_spinor(self.Pois, PNbr)
+            if self.restricted:
+                PNbr = 2* PNbr  #Factor 2 because the density is given by the sum of the "normal" spinors and their kramer-paired spinors, and the latter is exactly the same as the first one
+                #NOTE: the factor 2 takes into account the kramer conjugated electron, this fct is not general in that regards (only closed shell)
             return self.Pois(PNbr.real)
             # return output
         else: 
@@ -504,7 +529,7 @@ class scfsolv:
             phi_inp = self.phi_prev[inp][-1]    
         else:
             phi_inp = inp
-        if self.Nel > 1:
+        if self.Nel > 1 and self.restricted:
             # Korb = spinor(self.mra, self.Ncomp)
             # Korb.setZero()
             # for j in range(2*self.Nspinor): #TODO: ça risque de faire des double-comptages ça 
@@ -516,6 +541,12 @@ class scfsolv:
             for j in range(self.Nspinor):
                 Korb = Korb + self.phi_prev[j][-1] * self.Pois(4*np.pi*(self.phi_prev[j][-1].dot(phi_inp)).real) 
                 Korb = Korb + (self.phi_prev[j][-1].kramerConjugate()) * self.Pois(4*np.pi*((self.phi_prev[j][-1].kramerConjugate()).dot(phi_inp)).real)
+            return Korb
+        elif self.Nel > 1 and not self.restricted: #unrestricted case, Nspinor is equal to the number of electrons so there is no need to use the time inversion in any way (don't care about Kramers' pairs)
+            Korb = spinor(self.mra, self.Ncomp)
+            Korb.setZero()
+            for j in range(self.Nspinor):
+                Korb = Korb + self.phi_prev[j][-1] * self.Pois(4*np.pi*(self.phi_prev[j][-1].dot(phi_inp)).real) 
             return Korb
         else: 
             print("compute Korb only 1 e")
@@ -627,7 +658,7 @@ class scfsolv:
                 del self.phi_prev[orb][0]
                 del self.f_prev[orb][0]
         print("ExpandSol final S=", self.computeOverlap())
-        self.printOperators()
+        # self.printOperators()
         # print("end ExpandSol")
         return np.array(self.E_n), np.array(norm), np.array(update)
     
@@ -960,7 +991,7 @@ class scfsolv:
             else:
                 self.E_n, norm, update = self.expandSolution_nokain()
 
-            self.printOperators()
+            # self.printOperators()
             for orb in range(self.Nspinor):
                 # # this will plot the wavefunction at each iteration
                 # r_x = np.linspace(-5., 5., 1000)
@@ -1036,6 +1067,26 @@ class scfsolv:
     def guassianGuess(self, r, beta = 0.5):
         alpha = np.power(np.pi/beta, 3/2)
         return alpha * np.exp(beta * (np.power(r[0],2)+np.power(r[1],2)+np.power(r[2],2)))
+    
+    def guess2s(self, r): #only really valid for atoms, unnormalized
+        a0 = 1/self.c 
+        Ztot = 0
+        for i in range(len(self.Z)):
+            Ztot += self.Z[i]
+        # Zeff = Ztot/2 - 0.7
+        return (1-Ztot/a0*np.sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]))*np.exp(-Ztot/(20*a0) * np.sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]))
+    
+    def guess2p1half(self, r): # 2p1/2 = 2p_z ? WARNING unnormalized
+        a0 = 1/self.c 
+        for i in range(len(self.Z)):
+            Ztot += self.Z[i]
+        return self.c*self.Ztot*r[2]*np.exp(-Ztot/(2*a0) * (r[0]+r[1]+r[2]))
+    
+    def guess2p3half(self, r): # 2p3/2 = 2p_x + 2p_y ? : WARNING unnormalized
+        a0 = 1/self.c 
+        for i in range(len(self.Z)):
+            Ztot += self.Z[i]
+        return self.c*self.Ztot*(r[0]+r[1])*np.exp(-Ztot/(2*a0) * (r[0]+r[1]+r[2]))
 
     #Method to compute the nuclear-nuclear contribution to the energy.
     #[out]: Value of the nuclear-nuclear potential at the position "r" in space
@@ -1079,27 +1130,182 @@ class scfsolv:
         # print("compOverlap")
         if phi_orth == None:
             phi_orth = self.phi_prev
-            length = self.Nspinor
-        else: 
-            length = len(phi_orth)
-        if self.Nel > 2: #For only one "paired" orbital, we don't need any orthonormalisation
             length = self.Nel
-        print("CompOverlap", length)
-        S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
-        for i in range(int(np.floor(length/2))): #TODO: adapt to open shell
-            for j in range(i, int(np.floor(length/2))):
-                S[2*i,2*j] = phi_orth[i][-1].dotFull(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
-                # S[2*i,2*j+1] = phi_orth[i][-1].dotKramerFull(phi_orth[j][-1])
-                S[2*i,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1].kramerConjugate())
-                # print("CompOverlap", S[2*i,2*j+1], (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))
-                # S[2*i+1,2*j] = -1*np.conjugate(phi_orth[j][-1].dotKramerFull(phi_orth[i][-1])) #Ovelap between 
-                S[2*i+1,2*j] = (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1])
-                S[2*i+1,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1])
-                # S[i,j] = phi_orth[j][-1].dot(phi_orth[i][-1]) #compute the overlap of the current ([-1]) step
+        elif not self.restricted: 
+            length = len(phi_orth)
+        else:
+            length = 2*len(phi_orth)
+        if self.restricted:
+            print("CompOverlap", length)
+            S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
+            for i in range(int(np.floor(length/2))): #TODO: adapt to open shell
+                for j in range(i, int(np.floor(length/2))):
+                    S[2*i,2*j] = phi_orth[i][-1].dotFull(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
+                    # S[2*i,2*j+1] = phi_orth[i][-1].dotKramerFull(phi_orth[j][-1])
+                    S[2*i,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1].kramerConjugate())
+                    # print("CompOverlap", S[2*i,2*j+1], (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))
+                    # S[2*i+1,2*j] = -1*np.conjugate(phi_orth[j][-1].dotKramerFull(phi_orth[i][-1])) #Ovelap between 
+                    S[2*i+1,2*j] = (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1])
+                    S[2*i+1,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1])
+                    # S[i,j] = phi_orth[j][-1].dot(phi_orth[i][-1]) #compute the overlap of the current ([-1]) step
+        else: #unrestricted HF case
+            S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
+            for i in range(length): #TODO: adapt to open shell
+                for j in range(i, length):
+                    S[i,j] = phi_orth[i][-1].dotFull(phi_orth[j][-1]) #compute the overlap of the current ([-1]) step
+        #Complete the matrix, knowing that it is Hermitian            
         for i in range(length):
             for j in range(i, length):
                 if i != j:
                     S[j,i] = np.conjugate(S[i,j])
+        # print("S", S)
+        return S
+    
+
+    def initMolecRestrictedTest(self, No,  pos, Z, source_init_guess, guess_type = 1, sclr = True) -> None: 
+        # print("Initmolec")
+        self.Nz = len(Z)
+        self.R = pos
+        self.Z = Z
+        self.Nel = 4
+        self.restricted = True
+        self.Ncomp = 2
+        self.Nspinor = self.Nel // 2
+        self.scalar = sclr
+        self.Vnuc = self.P_eps(lambda r : self.f_nuc(r, threshold=-1e5))
+
+
+        phi = spinor(self.mra, self.Ncomp)
+        phi.setZero()
+        phi = utils.make_NR_starting_guess(self.R, self.Z, self.mra, self.prec)
+        phi.compVect[1].real = (-0.5)*phi.compVect[0].real
+        norm = (phi.compSqNorm())**0.5
+        phi = phi * (1/norm)
+        self.phi_prev.append([phi])
+        self.phi_prev[-1][-1].normalize()
+
+        phi = spinor(self.mra, self.Ncomp)
+        phi.setZero()
+        phi.compVect[0].real = self.P_eps(lambda r: self.guess2s(r))
+        # phi.compVect[1].imag = (-0.5)*self.P_eps(lambda r: self.guess2s(r))
+        phi.compVect[1].real = self.P_eps(lambda r: self.guess2s(r))
+        # phi.normalize()
+        norm = (phi.compSqNorm())**0.5
+        print("Norm phi1", phi.compSqNorm())
+        phi = phi * (1/norm)
+        self.phi_prev.append([phi])
+        self.phi_prev[-1][-1].normalize()
+
+        # self.phi_prev.append([self.P_eps(lambda r: self.guassianGuess(r, beta=0.5))])
+        # self.phi_prev.append([self.P_eps(lambda r: self.guess2s(r))])
+        for i in range(len(self.phi_prev)):
+            self.phi_prev[i][-1].normalize()
+            # self.phi_prev[i][-1] = self.phi_prev[i][-1].crop(self.prec)
+        print("Pre-Ortho S=", self.computeOverlap())#test
+
+        kramersPhi_prev = []
+        for i in range(len(self.phi_prev)):
+            kramersPhi_prev.append([self.phi_prev[i][-1].kramerConjugate()])
+
+        phitot = self.phi_prev + kramersPhi_prev
+
+        S = self.subsetOverlap(self.phi_prev, self.phi_prev)
+        print("S=", S)
+        # eigvalS, sU = np.linalg.eigh(S) #U is the basis change matrix
+        # s = np.diag(np.power(eigvalS, -0.5)) #diagonalised S 
+        # #Compute s^-1/2
+        # Sprime = np.dot(sU,np.dot(s,np.transpose(sU))) # S^-1/2 = U^dagger s^-1/2 U
+        
+        Sbar = self.subsetOverlap(kramersPhi_prev, self.phi_prev)
+        print("Sbar=", Sbar)
+        eigvalSbar, SbarU = np.linalg.eigh(Sbar) #U is the basis change matrix
+        print("Sbar eigvals=", eigvalSbar)
+        # sbar = np.diag(np.power(eigvalSbar, -0.5)) #diagonalised S 
+        # #Compute s^-1/2
+        # Sbarprime = np.dot(SbarU,np.dot(sbar,np.transpose(SbarU))) # S^-1/2 = U^dagger s^-1/2 U
+
+        Salt = self.subsetOverlap(kramersPhi_prev, kramersPhi_prev)
+        print("Salt=", Salt)
+
+        bigS = self.computePairOverlap(self.phi_prev)
+        print("bigS=",bigS)
+        eigvals, U = np.linalg.eigh(bigS) #U is the basis change matrix
+        print("orthonorm eigvals=", eigvals)
+        bigs = np.diag(np.power(eigvals, -0.5)) #diagonalised S 
+        bigSprime = np.dot(U,np.dot(bigs,np.transpose(U))) # S^-1/2 = U^dagger s^-1/2 U
+        print("sanity check:", bigSprime.dot(bigS).dot(bigSprime)) #should be identity
+        print("bigSprime=", bigSprime)
+
+
+        curlyS = self.subsetOverlap(phitot, phitot)
+        print("curlyS=",curlyS)
+        eigvals, U = np.linalg.eigh(curlyS) #U is the basis change matrix
+        print("orthonorm eigvals=", eigvals)
+
+        curlys = np.diag(np.power(eigvals, -0.5)) #diagonalised S 
+        #Compute s^-1/2
+        curlySprime = np.dot(U,np.dot(curlys,np.transpose(U))) # S^-1/2 = U^dagger s^-1/2 U
+        print("sanity check:", curlySprime.dot(curlyS).dot(curlySprime)) #should be identity
+        print("curlySprime=", curlySprime)
+        phi_ortho = []
+        # length = curlySprime.shape[1] #NOTE: correct length for correct but expensive orthonormalisation
+        length = bigSprime.shape[1] #NOTE: bivector orthonormalisation
+        for i in range(self.Nspinor):
+            # phi_tmp =  self.P_eps(utils.Fzero)
+            phi_tmp = spinor(self.mra, self.Ncomp)
+            phi_tmp.setZero()
+            # phi_tmp = self.phi_prev[i][-1]
+            for j in range(length): #TODO: needs to include the contribution of Kramer pairs
+            # for j in range(limit[i]):
+                # phi_tmp = phi_tmp + curlySprime[i,j]*phitot[j][-1] #ça marche
+                # phi_tmp = phi_tmp + np.sqrt(bigS[i,j]/2)*self.phi_prev[j][-1] +  1j*np.sqrt(bigS[i,j]/2)*kramersPhi_prev[j][-1]
+                
+                # phi_tmp = phi_tmp + curlySprime[j,i]*(S[j,i]*self.phi_prev[j][-1] - Sbar[j,i]*kramersPhi_prev[j][-1])
+                # phi_tmp = phi_tmp + curlySprime[i,j]*self.phi_prev[j][-1]
+                # phi_tmp = phi_tmp - (Sbar[i,j]**(-0.5))*kramersPhi_prev[j][-1]
+                phi_tmp = phi_tmp + bigSprime[i,j]*(np.conjugate(S[i,j])*self.phi_prev[j][-1] - Sbar[i,j]*kramersPhi_prev[j][-1])
+                # phi_tmp = phi_tmp + curlySprime[i,j]*((S[i,j]**(0.5))*self.phi_prev[j][-1] + (Sbar[i,j]**(0.5))*kramersPhi_prev[j][-1])
+                # phi_tmp = phi_tmp + Sprime[j,i]*phi_in[j][-1] #TODO: Test to orthonormalise
+            # if normalise: 
+            phi_tmp.normalize()
+            phi_tmp = phi_tmp.crop(self.prec)
+            phi_ortho.append([phi_tmp])
+        print("Post-Ortho S=", self.computeOverlap(phi_ortho))#test
+
+
+    def subsetOverlap(self, phi1, phi2):
+        length1 = len(phi1)
+        length2 = len(phi2)
+        S = np.zeros((length1, length2), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
+        for i in range(length1):
+            for j in range(length2):
+                S[i,j] = phi1[i][-1].dotFull(phi2[j][-1]) #compute the overlap of the current ([-1]) step
+        return S
+
+
+    def computePairOverlap(self, phi_orth = None):
+        if phi_orth == None:
+            phi_orth = self.phi_prev
+            length = len(self.phi_prev)
+        else: 
+            length = len(phi_orth)
+        if self.restricted:
+            print("CompOverlap", length)
+            S = np.zeros((length, length), dtype=complex) #Overlap matrix S_i,j = <Phi^i|Phi^j>
+            for i in range(length): #TODO: adapt to open shell
+                for j in range(length):
+                    # S[i,j] = np.sqrt(np.absolute(phi_orth[i][-1].dotFull(phi_orth[j][-1]))**2 + np.absolute((phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))**2) #compute the overlap of the current ([-1]) step
+                    S[i,j] = np.absolute(phi_orth[i][-1].dotFull(phi_orth[j][-1]))**2 + np.absolute((phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))**2 #compute the overlap of the current ([-1]) step
+                    # S[i,j] = np.absolute(phi_orth[i][-1].dotFull(phi_orth[j][-1])) + np.absolute((phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1])) #compute the overlap of the current ([-1]) step
+                    # S[j,i] = (phi_orth[i][-1].dotFull(phi_orth[j][-1]))**2 + np.absolute((phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))**2 #compute the overlap of the current ([-1]) step
+
+                    # S[2*i,2*j+1] = phi_orth[i][-1].dotKramerFull(phi_orth[j][-1])
+                    # S[2*i,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1].kramerConjugate())
+                    # # print("CompOverlap", S[2*i,2*j+1], (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1]))
+                    # # S[2*i+1,2*j] = -1*np.conjugate(phi_orth[j][-1].dotKramerFull(phi_orth[i][-1])) #Ovelap between 
+                    # S[2*i+1,2*j] = (phi_orth[i][-1].kramerConjugate()).dotFull(phi_orth[j][-1])
+                    # S[2*i+1,2*j+1] = phi_orth[i][-1].dotFull(phi_orth[j][-1])
+                    # S[i,j] = phi_orth[j][-1].dot(phi_orth[i][-1]) #compute the overlap of the current ([-1]) step
         # print("S", S)
         return S
     
@@ -1162,33 +1368,51 @@ class scfsolv:
         s = np.diag(np.power(eigvals, -0.5)) #diagonalised S 
         #Compute s^-1/2
         Sprime = np.dot(U,np.dot(s,np.transpose(U))) # S^-1/2 = U^dagger s^-1/2 U
-        length = max(1, int(np.floor(self.Nel/2)))
-
-        #Apply S' to each orbital to obtain a new orthogonal element
-        phi_ortho = []
-        phi_test = [] #test 
-        for i in range(length):
-            # phi_tmp =  self.P_eps(utils.Fzero)
-            phi_tmp = spinor(self.mra, self.Ncomp)
-            phi_tmp.setZero()
-            for j in range(length): #TODO: needs to include the contribution of Kramer pairs
-            # for j in range(limit[i]):
-                # phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1] + Sprime[2*i, 2*j+1]*phi_in[j][-1].kramerConjugate() #TODO not sufficient 
-                phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1]
-                # phi_tmp = phi_tmp + Sprime[j,i]*phi_in[j][-1] #TODO: Test to orthonormalise
-            if normalise: 
-                phi_tmp.normalize()
-            phi_tmp = phi_tmp.crop(self.prec)
-            phi_ortho.append(phi_tmp)
-            phi_test.append([phi_tmp]) #test
-        test_orthonorm = True
-        if test_orthonorm:
-            print("Test orthonorm")
-            for i in range(1,length):
-                for j in range(length):
-                    if j != i:
-                        phi_ortho[i] = phi_ortho[i] - complex(S[2*j+1,2*i])*(phi_in[j][-1].kramerConjugate())
-
+        if self.restricted:
+            length = max(1, int(np.floor(self.Nel/2)))
+            
+            #Apply S' to each orbital to obtain a new orthogonal element
+            phi_ortho = []
+            phi_test = [] #test 
+            for i in range(length):
+                # phi_tmp =  self.P_eps(utils.Fzero)
+                phi_tmp = spinor(self.mra, self.Ncomp)
+                phi_tmp.setZero()
+                for j in range(length): #TODO: needs to include the contribution of Kramer pairs
+                # for j in range(limit[i]):
+                    # phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1] + Sprime[2*i, 2*j+1]*phi_in[j][-1].kramerConjugate() #TODO not sufficient 
+                    phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1]
+                    # phi_tmp = phi_tmp + Sprime[j,i]*phi_in[j][-1] #TODO: Test to orthonormalise
+                if normalise: 
+                    phi_tmp.normalize()
+                phi_tmp = phi_tmp.crop(self.prec)
+                phi_ortho.append(phi_tmp)
+                phi_test.append([phi_tmp]) #test
+            test_orthonorm = True
+            if test_orthonorm:
+                print("Test orthonorm")
+                for i in range(1,length):
+                    for j in range(length):
+                        if j != i:
+                            phi_ortho[i] = phi_ortho[i] - complex(S[2*j+1,2*i])*(phi_in[j][-1].kramerConjugate())
+        else: #Unrestricted HF case
+            length = self.Nel
+            #Apply S' to each orbital to obtain a new orthogonal element
+            phi_ortho = []
+            phi_test = [] #test 
+            for i in range(length):
+                # phi_tmp =  self.P_eps(utils.Fzero)
+                phi_tmp = spinor(self.mra, self.Ncomp)
+                phi_tmp.setZero()
+                for j in range(length): #TODO: needs to include the contribution of Kramer pairs
+                # for j in range(limit[i]):
+                    # phi_tmp = phi_tmp + Sprime[2*i,2*j]*phi_in[j][-1] + Sprime[2*i, 2*j+1]*phi_in[j][-1].kramerConjugate() #TODO not sufficient 
+                    phi_tmp = phi_tmp + Sprime[i,j]*phi_in[j][-1]
+                    # phi_tmp = phi_tmp + Sprime[j,i]*phi_in[j][-1] #TODO: Test to orthonormalise
+                if normalise: 
+                    phi_tmp.normalize()
+                phi_tmp = phi_tmp.crop(self.prec)
+                phi_ortho.append(phi_tmp)
         print("Post-Ortho S=", self.computeOverlap(phi_test))#test
         return phi_ortho
     

@@ -1,6 +1,7 @@
 from vampyr import vampyr3d as vp
 import math
 import numpy as np
+np.math = math
 import matplotlib.pyplot as plt
 from copy import deepcopy
 

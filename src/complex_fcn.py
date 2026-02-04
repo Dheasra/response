@@ -251,7 +251,7 @@ class complex_fcn:
 
         fbd = 1.0
         fbc = -1.0
-        if(not cc_first):
+        if(cc_first):
             fbd = -1.0
             fbc = 1.0
         
